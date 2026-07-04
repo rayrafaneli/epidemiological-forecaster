@@ -1,4 +1,8 @@
 pandas
-pysus
+requests
+# pysus
+scikit-learn
 xgboost
 geopandas
+networkx
+streamlit
