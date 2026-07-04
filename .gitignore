@@ -1,2 +1,8 @@
 data/
 .env
+.venv
+tmp_*
+tmp_*.py
+.csv
+**/*.csv
+__pycache__/
