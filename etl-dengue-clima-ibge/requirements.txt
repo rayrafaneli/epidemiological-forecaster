@@ -1,0 +1,15 @@
+# requirements.txt
+# ---------------------------------------------------------------------------
+# Por que fixar as versões (==) e não deixar livre?
+# Em projetos de dados/ETL, uma atualização silenciosa de uma lib (ex: pandas)
+# pode mudar o comportamento de uma função e quebrar o pipeline sem avisar.
+# Fixar a versão garante que o projeto rode igual na sua máquina, no
+# professor/avaliador e em produção (princípio de reprodutibilidade).
+# ---------------------------------------------------------------------------
+
+requests==2.31.0        # Fazer chamadas HTTP às APIs do INMET, IBGE e (futuramente) Recife
+pandas==2.2.2            # Manipulação e limpeza de dados tabulares (DataFrames)
+SQLAlchemy==2.0.30        # ORM / Core para abstrair o acesso ao PostgreSQL
+psycopg2-binary==2.9.9    # Driver de baixo nível que o SQLAlchemy usa para falar com o PostgreSQL
+python-dotenv==1.0.1      # Ler variáveis sensíveis (senha, host, etc.) de um arquivo .env
+schedule==1.2.2           # Agendar a rotina diária de atualização (camada scheduler)
