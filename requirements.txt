@@ -6,3 +6,5 @@ xgboost
 geopandas
 networkx
 streamlit
+pytest
+pytest-mock
