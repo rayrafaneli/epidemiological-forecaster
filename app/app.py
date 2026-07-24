@@ -4,6 +4,10 @@ import plotly.graph_objects as go
 import plotly.express as px
 import streamlit.components.v1 as components
 from contextlib import contextmanager
+import os
+import unicodedata
+
+import requests
 
 # Requer Streamlit 1.40 ou superior para st.container(height=...).
 
@@ -545,7 +549,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-### dados teste
+### DADOS E INTEGRAÇÃO COM A API
 RISK_COLORS = {
     "Baixo": "#20c665",
     "Médio": "#ffd448",
@@ -555,27 +559,126 @@ RISK_COLORS = {
 
 RISK_ORDER = ["Baixo", "Médio", "Alto", "Crítico"]
 
-bairros = pd.DataFrame(
-    [
-        ["2611606002", "Afogados", "PE", "Recife", "2025-01", 35400, 48.1, 31.2, 42, 38, 118.6, "Crítico", -8.0785, -34.9086],
-        ["2611606003", "Cohab", "PE", "Recife", "2025-01", 37610, 51.8, 31.1, 36, 31, 95.7, "Alto", -8.1184, -34.9535],
-        ["2611606004", "Ibura", "PE", "Recife", "2025-01", 37740, 50.5, 31.4, 28, 24, 74.2, "Alto", -8.1160, -34.9360],
-        ["2611606005", "Jordão", "PE", "Recife", "2025-01", 34700, 44.3, 30.9, 22, 20, 63.4, "Alto", -8.1300, -34.9250],
-        ["2611606001", "Boa Viagem", "PE", "Recife", "2025-01", 122922, 45.2, 31.5, 14, 12, 11.3, "Médio", -8.1260, -34.9000],
-        ["2611606006", "Casa Amarela", "PE", "Recife", "2025-01", 127500, 42.0, 31.0, 13, 10, 10.2, "Médio", -8.0265, -34.9170],
-        ["2611606007", "Imbiribeira", "PE", "Recife", "2025-01", 120800, 39.2, 31.8, 11, 8, 9.1, "Médio", -8.1050, -34.9100],
-        ["3304557001", "Campo Grande", "RJ", "Rio de Janeiro", "2025-01", 328370, 74.4, 32.2, 10, 9, 8.7, "Médio", -22.9028, -43.5614],
-        ["3550308001", "Cidade Tiradentes", "SP", "São Paulo", "2025-01", 211501, 82.0, 29.8, 72, 63, 34.0, "Alto", -23.5850, -46.3980],
-        ["5300108001", "Ceilândia", "DF", "Brasília", "2025-01", 432927, 90.1, 30.5, 95, 81, 21.9, "Crítico", -15.8194, -48.1083],
-        ["1302603001", "Cidade Nova", "AM", "Manaus", "2025-01", 121135, 105.2, 32.6, 54, 49, 44.6, "Alto", -3.0330, -60.0000],
-        ["2304400001", "Messejana", "CE", "Fortaleza", "2025-01", 41000, 68.3, 31.8, 31, 26, 75.6, "Alto", -3.8320, -38.4940],
-        ["4314902001", "Restinga", "RS", "Porto Alegre", "2025-01", 60000, 52.0, 28.4, 18, 16, 30.0, "Médio", -30.1500, -51.1800],
-    ],
-    columns=[
-        "bairro_id", "Bairro", "UF", "Cidade", "Semana", "População", "Chuva lag4", "Temp. max lag4",
-        "Casos previstos", "Casos históricos", "Incidência por 100 mil", "Nível de alerta", "lat", "lon"
-    ],
-)
+FALLBACK_API_PAYLOAD = [
+    {
+        "bairro_id": "2611606001",
+        "bairro_nome": "Boa Viagem",
+        "semana_epidemiologica": "2025-01",
+        "populacao_total": 122922,
+        "dados_climaticos": {"chuva_lag4_mm": 45.2, "temp_max_lag4_c": 31.5},
+        "previsao_modelo": {
+            "casos_previstos": 14,
+            "casos_reais_historico": 12,
+            "taxa_incidencia_100k": 11.3,
+            "nivel_alerta": "Medio",
+        },
+    },
+    {
+        "bairro_id": "2611606002",
+        "bairro_nome": "Afogados",
+        "semana_epidemiologica": "2025-01",
+        "populacao_total": 35400,
+        "dados_climaticos": {"chuva_lag4_mm": 48.1, "temp_max_lag4_c": 31.2},
+        "previsao_modelo": {
+            "casos_previstos": 42,
+            "casos_reais_historico": 38,
+            "taxa_incidencia_100k": 118.6,
+            "nivel_alerta": "Critico",
+        },
+    },
+]
+
+# O contrato atual não fornece localização. Este catálogo mantém o mapa funcional
+# até que a API passe a retornar lat, lon, cidade e UF.
+LOCATION_FALLBACK = {
+    "2611606001": {"UF": "PE", "Cidade": "Recife", "lat": -8.1260, "lon": -34.9000},
+    "2611606002": {"UF": "PE", "Cidade": "Recife", "lat": -8.0785, "lon": -34.9086},
+}
+
+
+def normalize_alert(value):
+    text = unicodedata.normalize("NFKD", str(value or ""))
+    text = "".join(char for char in text if not unicodedata.combining(char)).strip().lower()
+    return {
+        "baixo": "Baixo",
+        "medio": "Médio",
+        "alto": "Alto",
+        "critico": "Crítico",
+    }.get(text, "Baixo")
+
+
+def normalize_api_payload(payload):
+    if isinstance(payload, dict):
+        payload = payload.get("data", payload.get("resultados", payload.get("bairros", [])))
+    if not isinstance(payload, list):
+        raise ValueError("A resposta da API deve ser uma lista de bairros.")
+
+    rows = []
+    for item in payload:
+        climate = item.get("dados_climaticos") or {}
+        forecast = item.get("previsao_modelo") or {}
+        bairro_id = str(item.get("bairro_id", "")).strip()
+        location = LOCATION_FALLBACK.get(bairro_id, {})
+        rows.append(
+            {
+                "bairro_id": bairro_id,
+                "Bairro": item.get("bairro_nome") or "Bairro não informado",
+                "UF": item.get("uf") or location.get("UF", "N/D"),
+                "Cidade": item.get("cidade") or location.get("Cidade", "N/D"),
+                "Semana": item.get("semana_epidemiologica") or "N/D",
+                "População": item.get("populacao_total") or 0,
+                "Chuva lag4": climate.get("chuva_lag4_mm") or 0,
+                "Temp. max lag4": climate.get("temp_max_lag4_c") or 0,
+                "Casos previstos": forecast.get("casos_previstos") or 0,
+                "Casos históricos": forecast.get("casos_reais_historico") or 0,
+                "Incidência por 100 mil": forecast.get("taxa_incidencia_100k") or 0,
+                "Nível de alerta": normalize_alert(forecast.get("nivel_alerta")),
+                "lat": item.get("lat", location.get("lat")),
+                "lon": item.get("lon", location.get("lon")),
+            }
+        )
+
+    if not rows:
+        raise ValueError("A API retornou uma lista vazia.")
+
+    df = pd.DataFrame(rows)
+    numeric_columns = [
+        "População", "Chuva lag4", "Temp. max lag4", "Casos previstos",
+        "Casos históricos", "Incidência por 100 mil", "lat", "lon",
+    ]
+    for column in numeric_columns:
+        df[column] = pd.to_numeric(df[column], errors="coerce")
+
+    return df.sort_values(
+        ["Casos previstos", "Incidência por 100 mil"], ascending=False
+    ).reset_index(drop=True)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_api_payload(api_url):
+    response = requests.get(
+        api_url,
+        timeout=15,
+        headers={"Accept": "application/json"},
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def load_bairros(api_url, force_refresh=False):
+    if force_refresh:
+        fetch_api_payload.clear()
+
+    if not api_url:
+        return normalize_api_payload(FALLBACK_API_PAYLOAD), "demonstração", None
+
+    try:
+        payload = fetch_api_payload(api_url)
+        return normalize_api_payload(payload), "API", None
+    except (requests.RequestException, ValueError, TypeError) as exc:
+        if "bairros_snapshot" in st.session_state:
+            return st.session_state.bairros_snapshot.copy(), "último dado válido", str(exc)
+        return normalize_api_payload(FALLBACK_API_PAYLOAD), "demonstração", str(exc)
 
 serie_casos = pd.DataFrame(
     {
@@ -670,35 +773,99 @@ def sidebar_logo():
     )
 
 
-def topbar(kind="alerta"):
+def _select_filter(label, options, key, all_label="Todas"):
+    values = [all_label] + sorted({str(value) for value in options if pd.notna(value)})
+    if st.session_state.get(key) not in values:
+        st.session_state[key] = all_label
+    return st.selectbox(label, values, key=key)
+
+
+def topbar(data, kind="alerta"):
+    """Renderiza filtros reais e devolve somente as linhas selecionadas."""
+    filtered = data.copy()
+    st.markdown(
+        '<div class="topbar-title" style="margin-bottom:8px;">'
+        'Sistema Inteligente de Predição de Dengue</div>',
+        unsafe_allow_html=True,
+    )
+
     if kind == "risco":
-        extra = (
-            '<div class="fake-select"><div><span>Região</span>Todas</div><div>⌄</div></div>'
-            '<div class="fake-select"><div><span>UF</span>Todos</div><div>⌄</div></div>'
-            '<div class="fake-select"><div><span>Nível de risco</span>Todos</div><div>⌄</div></div>'
+        current_hospital_week = (
+            bairros["Semana"].dropna().astype(str).max()
+            if not bairros.empty
+            else "N/D"
         )
+        filtered["Semana"] = current_hospital_week
+        region_by_uf = {
+            "AC": "Norte", "AP": "Norte", "AM": "Norte", "PA": "Norte",
+            "RO": "Norte", "RR": "Norte", "TO": "Norte",
+            "AL": "Nordeste", "BA": "Nordeste", "CE": "Nordeste",
+            "MA": "Nordeste", "PB": "Nordeste", "PE": "Nordeste",
+            "PI": "Nordeste", "RN": "Nordeste", "SE": "Nordeste",
+            "DF": "Centro-Oeste", "GO": "Centro-Oeste",
+            "MT": "Centro-Oeste", "MS": "Centro-Oeste",
+            "ES": "Sudeste", "MG": "Sudeste", "RJ": "Sudeste", "SP": "Sudeste",
+            "PR": "Sul", "RS": "Sul", "SC": "Sul",
+        }
+        filtered["Região"] = filtered["UF"].map(region_by_uf).fillna("N/D")
+        c_week, c_region, c_uf, c_level = st.columns([1.35, 0.75, 0.65, 0.9])
+        with c_week:
+            week = _select_filter(
+                "Semana epidemiológica",
+                filtered["Semana"],
+                "hospital_filter_week",
+            )
+        if week != "Todas":
+            filtered = filtered[filtered["Semana"].astype(str) == week]
+        with c_region:
+            region = _select_filter(
+                "Região", filtered["Região"], "hospital_filter_region"
+            )
+        if region != "Todas":
+            filtered = filtered[filtered["Região"] == region]
+        with c_uf:
+            uf = _select_filter("UF", filtered["UF"], "hospital_filter_uf")
+        if uf != "Todas":
+            filtered = filtered[filtered["UF"] == uf]
+        with c_level:
+            level = _select_filter(
+                "Nível de risco",
+                filtered["Nível de risco"],
+                "hospital_filter_level",
+                all_label="Todos",
+            )
+        if level != "Todos":
+            filtered = filtered[filtered["Nível de risco"] == level]
     else:
-        extra = (
-            '<div class="fake-select"><div><span>UF</span>Todas</div><div>⌄</div></div>'
-            '<div class="fake-select"><div><span>Cidade</span>Todas</div><div>⌄</div></div>'
-            '<div class="fake-select"><div><span>Nível de alerta</span>Todos</div><div>⌄</div></div>'
-        )
+        c_week, c_uf, c_city, c_level = st.columns([1.35, 0.65, 0.8, 0.9])
+        with c_week:
+            week = _select_filter(
+                "Semana epidemiológica", filtered["Semana"], f"{kind}_filter_week"
+            )
+        if week != "Todas":
+            filtered = filtered[filtered["Semana"].astype(str) == week]
+        with c_uf:
+            uf = _select_filter("UF", filtered["UF"], f"{kind}_filter_uf")
+        if uf != "Todas":
+            filtered = filtered[filtered["UF"] == uf]
+        with c_city:
+            city = _select_filter(
+                "Cidade", filtered["Cidade"], f"{kind}_filter_city"
+            )
+        if city != "Todas":
+            filtered = filtered[filtered["Cidade"] == city]
+        with c_level:
+            level = _select_filter(
+                "Nível de alerta",
+                filtered["Nível de alerta"],
+                f"{kind}_filter_level",
+                all_label="Todos",
+            )
+        if level != "Todos":
+            filtered = filtered[filtered["Nível de alerta"] == level]
 
-    html = f'''
-<div class="topbar">
-    <div class="topbar-title">Sistema Inteligente de Predição de Dengue</div>
-    <div class="topbar-controls">
-        <div class="fake-select large">
-            <div>📅&nbsp;&nbsp;Semana epidemiológica: 2025-01</div>
-            <div>⌄</div>
-        </div>
-        {extra}
-        <div class="bell">🔔<span class="bell-badge">3</span></div>
-    </div>
-</div>
-'''
-
-    st.markdown(html, unsafe_allow_html=True)
+    st.caption(f"{len(filtered)} registro(s) na seleção atual")
+    return filtered.reset_index(drop=True)
 
 
 def page_title(title, breadcrumb=None, action=None):
@@ -959,8 +1126,11 @@ def small_location_map(row):
     return fig
 
 
-def ranking_table_dashboard():
-    ranking = bairros.head(8).copy().reset_index(drop=True)
+def ranking_table_dashboard(data=None):
+    source = bairros if data is None else data
+    ranking = source.sort_values(
+        ["Incidência por 100 mil", "Casos previstos"], ascending=False
+    ).head(8).copy().reset_index(drop=True)
     rows = []
 
     for idx, row in ranking.iterrows():
@@ -991,8 +1161,9 @@ def ranking_table_dashboard():
     )
 
 
-def ranking_table_hospitals():
-    temp = hospitais.copy().sort_values("Ocupação prevista", ascending=False).reset_index(drop=True)
+def ranking_table_hospitals(data=None):
+    source = hospitais if data is None else data
+    temp = source.copy().sort_values("Ocupação prevista", ascending=False).reset_index(drop=True)
     rows = []
 
     for idx, row in temp.iterrows():
@@ -1399,6 +1570,57 @@ def details_table_bairro(row):
     )
 
 sidebar_logo()
+
+default_api_url = os.getenv("SIPD_API_URL", "")
+if "api_url" not in st.session_state:
+    st.session_state.api_url = default_api_url
+
+with st.sidebar.expander("Fonte de dados", expanded=False):
+    api_url_input = st.text_input(
+        "URL da API",
+        value=st.session_state.api_url,
+        placeholder="http://localhost:8000/previsoes",
+        help="Deixe vazio para usar os dados de demonstração.",
+    )
+    force_refresh = st.button("Atualizar dados", use_container_width=True)
+
+if api_url_input != st.session_state.api_url:
+    st.session_state.api_url = api_url_input.strip()
+    force_refresh = True
+
+bairros, data_source, api_error = load_bairros(
+    st.session_state.api_url,
+    force_refresh=force_refresh,
+)
+st.session_state.bairros_snapshot = bairros.copy()
+
+if api_error:
+    st.sidebar.warning(
+        "Não foi possível consultar a API. Exibindo "
+        f"{data_source}. Detalhe: {api_error}"
+    )
+else:
+    st.sidebar.success(f"Dados carregados: {data_source}")
+
+available_ids = bairros["bairro_id"].astype(str).tolist()
+if st.session_state.get("selected_bairro_id") not in available_ids:
+    st.session_state.selected_bairro_id = available_ids[0]
+
+serie_casos = (
+    bairros.groupby("Semana", as_index=False)["Casos previstos"]
+    .sum()
+    .sort_values("Semana")
+)
+serie_casos["Semana"] = serie_casos["Semana"].map(lambda value: f"SE {str(value).split('-')[-1]}")
+
+serie_clima = (
+    bairros.groupby("Semana", as_index=False)
+    .agg({"Chuva lag4": "mean", "Temp. max lag4": "mean"})
+    .sort_values("Semana")
+    .rename(columns={"Chuva lag4": "Chuva (mm)", "Temp. max lag4": "Temperatura (°C)"})
+)
+serie_clima["Semana"] = serie_clima["Semana"].map(lambda value: f"SE {str(value).split('-')[-1]}")
+
 menu = st.sidebar.radio(
     "Menu",
     ["▦  Dashboard", "▥  Bairros", "▣  Hospitais", "▤  Relatórios"],
@@ -1412,17 +1634,39 @@ st.sidebar.caption("© 2026 SIPD")
 
 ### TELA 1
 if page == "Dashboard":
-    topbar("alerta")
+    dashboard_bairros = topbar(bairros, "dashboard")
+
+    total_bairros = len(dashboard_bairros)
+    total_casos = int(dashboard_bairros["Casos previstos"].sum())
+    total_criticos = int((dashboard_bairros["Nível de alerta"] == "Crítico").sum())
+    incidencia_media = float(dashboard_bairros["Incidência por 100 mil"].mean())
+    dashboard_serie_casos = (
+        dashboard_bairros.groupby("Semana", as_index=False)["Casos previstos"].sum()
+    )
+    dashboard_serie_casos["Semana"] = dashboard_serie_casos["Semana"].map(
+        lambda value: f"SE {str(value).split('-')[-1]}"
+    )
+    dashboard_serie_clima = (
+        dashboard_bairros.groupby("Semana", as_index=False)
+        .agg({"Chuva lag4": "mean", "Temp. max lag4": "mean"})
+        .rename(columns={
+            "Chuva lag4": "Chuva (mm)",
+            "Temp. max lag4": "Temperatura (°C)",
+        })
+    )
+    dashboard_serie_clima["Semana"] = dashboard_serie_clima["Semana"].map(
+        lambda value: f"SE {str(value).split('-')[-1]}"
+    )
 
     k1, k2, k3, k4, k5 = st.columns(5)
     with k1:
-        kpi("Bairros monitorados", "1.248", "vs semana anterior", "🏢", "#1683ff", "↑ 8,2%", "trend-good")
+        kpi("Bairros monitorados", br_int(total_bairros), f"Fonte: {data_source}", "🏢", "#1683ff")
     with k2:
-        kpi("Casos previstos", "1.382", "vs semana anterior", "📈", "#0b72ee", "↑ 15,7%", "trend-up")
+        kpi("Casos previstos", br_int(total_casos), "na seleção atual", "📈", "#0b72ee")
     with k3:
-        kpi("Alerta crítico", "126", "vs semana anterior", "⚠️", "#f1283c", "↑ 22,1%", "trend-up")
+        kpi("Alerta crítico", br_int(total_criticos), "bairros", "⚠️", "#f1283c")
     with k4:
-        kpi("Taxa média de incidência", "45,8", "vs semana anterior", "〽️", "#12bfc9", "↓ 5,3%", "trend-down")
+        kpi("Taxa média de incidência", br_float(incidencia_media), "por 100 mil hab.", "〽️", "#12bfc9")
     with k5:
         kpi("Risco de superlotação", "68%", "vs semana anterior", "👥", "#8556e8", "↑ 6,4%", "trend-orange")
 
@@ -1431,12 +1675,12 @@ if page == "Dashboard":
 
     with col_map:
         with section("Mapa de calor — Risco de dengue no Brasil", height=500, key="dashboard_map", css_class="map-section"):
-            fig_map = brazil_map(bairros, "Nível de alerta", "Bairro", "Casos previstos")
+            fig_map = brazil_map(dashboard_bairros, "Nível de alerta", "Bairro", "Casos previstos")
             st.plotly_chart(fig_map, use_container_width=True, config={"displayModeBar": False})
 
     with col_rank:
         with section("Bairros com maior risco", height=500, key="dashboard_ranking", css_class="rank-section"):
-            st.markdown(ranking_table_dashboard(), unsafe_allow_html=True)
+            st.markdown(ranking_table_dashboard(dashboard_bairros), unsafe_allow_html=True)
 
     st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
     col_line, col_clima, col_update = st.columns([1.05, 1.20, 0.80], gap="large")
@@ -1444,15 +1688,15 @@ if page == "Dashboard":
     with col_line:
         with section("Evolução semanal dos casos previstos", height=370, key="dashboard_weekly", css_class="chart-section"):
             fig = go.Figure()
-            fig.add_trace(go.Scatter(x=serie_casos["Semana"], y=serie_casos["Casos previstos"], mode="lines+markers+text", text=serie_casos["Casos previstos"], textposition="top center", line=dict(color="#1683ff", width=3), marker=dict(size=8)))
+            fig.add_trace(go.Scatter(x=dashboard_serie_casos["Semana"], y=dashboard_serie_casos["Casos previstos"], mode="lines+markers+text", text=dashboard_serie_casos["Casos previstos"], textposition="top center", line=dict(color="#1683ff", width=3), marker=dict(size=8)))
             fig = apply_chart_layout(fig, height=290, showlegend=False)
             st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
     with col_clima:
         with section("Influência climática", height=370, key="dashboard_climate", css_class="chart-section"):
             fig = go.Figure()
-            fig.add_trace(go.Bar(x=serie_clima["Semana"], y=serie_clima["Chuva (mm)"], name="Chuva (mm)", marker_color="#1683ff", text=serie_clima["Chuva (mm)"], textposition="outside"))
-            fig.add_trace(go.Scatter(x=serie_clima["Semana"], y=serie_clima["Temperatura (°C)"], name="Temperatura (°C)", mode="lines+markers+text", yaxis="y2", line=dict(color="#f1283c", width=2), text=[f"{br_float(v)}°C" for v in serie_clima["Temperatura (°C)"]], textposition="top center"))
+            fig.add_trace(go.Bar(x=dashboard_serie_clima["Semana"], y=dashboard_serie_clima["Chuva (mm)"], name="Chuva (mm)", marker_color="#1683ff", text=dashboard_serie_clima["Chuva (mm)"], textposition="outside"))
+            fig.add_trace(go.Scatter(x=dashboard_serie_clima["Semana"], y=dashboard_serie_clima["Temperatura (°C)"], name="Temperatura (°C)", mode="lines+markers+text", yaxis="y2", line=dict(color="#f1283c", width=2), text=[f"{br_float(v)}°C" for v in dashboard_serie_clima["Temperatura (°C)"]], textposition="top center"))
             fig.update_layout(
                 yaxis=dict(title="mm", range=[0, 105]),
                 yaxis2=dict(title="°C", overlaying="y", side="right", range=[20, 36]),
@@ -1462,11 +1706,12 @@ if page == "Dashboard":
 
     with col_update:
         with section("Últimas atualizações do modelo", height=370, key="dashboard_updates", css_class="updates-section"):
+            current_week = bairros["Semana"].dropna().astype(str).max()
             st.markdown(
-                """
+                f"""
                 <div class="updates-row"><div class="updates-icon" style="background:#e9fbef;color:#20c665;">✓</div><div><b>Modelo atualizado há 2 horas</b><br><span class="muted">05/01/2025 08:35</span></div></div>
                 <div class="updates-row"><div class="updates-icon" style="background:#eaf3ff;color:#1683ff;">◎</div><div><b>Precisão estimada: 89%</b><br><span class="muted">Baseado nas últimas 4 semanas</span></div></div>
-                <div class="updates-row"><div class="updates-icon" style="background:#f1ecff;color:#8556e8;">▦</div><div><b>Dados processados até: SE 2025-01</b><br><span class="muted">05/01/2025 06:00</span></div></div>
+                <div class="updates-row"><div class="updates-icon" style="background:#f1ecff;color:#8556e8;">▦</div><div><b>Dados processados até: SE {current_week}</b><br><span class="muted">Fonte atual: {data_source}</span></div></div>
                 <div style="color:#0b72ee;font-weight:900;margin-top:14px;">Ver histórico de atualizações ›</div>
                 """,
                 unsafe_allow_html=True,
@@ -1474,22 +1719,50 @@ if page == "Dashboard":
 
 ### TELA 2
 elif page == "Bairros":
-    topbar("alerta")
-    page_title("Detalhe do Bairro", "Dashboard  ›  Bairros  ›  Boa Viagem", "⬇ Exportar relatório")
-
-    row = bairros[bairros["Bairro"] == "Boa Viagem"].iloc[0]
+    detail_bairros = topbar(bairros, "bairro")
+    filtered_ids = detail_bairros["bairro_id"].astype(str).tolist()
+    if st.session_state.get("selected_bairro_id") not in filtered_ids:
+        st.session_state.selected_bairro_id = filtered_ids[0]
+    bairro_options = detail_bairros.set_index("bairro_id")["Bairro"].to_dict()
+    selected_bairro_id = st.selectbox(
+        "Selecione o bairro",
+        options=list(bairro_options.keys()),
+        format_func=lambda value: bairro_options[value],
+        key="selected_bairro_id",
+    )
+    row = detail_bairros[
+        detail_bairros["bairro_id"].astype(str) == str(selected_bairro_id)
+    ].iloc[0]
+    page_title(
+        "Detalhe do Bairro",
+        f"Dashboard  ›  Bairros  ›  {row['Bairro']}",
+        "⬇ Exportar relatório",
+    )
+    serie_bairro = pd.DataFrame(
+        {
+            "Semana": [f"SE {str(row['Semana']).split('-')[-1]}"],
+            "Casos previstos": [row["Casos previstos"]],
+            "Casos históricos": [row["Casos históricos"]],
+        }
+    )
 
     k1, k2, k3, k4, k5 = st.columns(5)
     with k1:
         kpi("População total", br_int(row["População"]), "habitantes", "👥", "#1683ff")
     with k2:
-        kpi("Casos previstos", str(row["Casos previstos"]), "para a SE 2025-01", "📈", "#72aefb")
+        kpi("Casos previstos", str(int(row["Casos previstos"])), f"para a SE {row['Semana']}", "📈", "#72aefb")
     with k3:
-        kpi("Casos históricos", str(row["Casos históricos"]), "na SE 2025-01", "📋", "#8ee6df")
+        kpi("Casos históricos", str(int(row["Casos históricos"])), f"na SE {row['Semana']}", "📋", "#8ee6df")
     with k4:
         kpi("Incidência por 100 mil", br_float(row["Incidência por 100 mil"]), "por 100 mil hab.", "〽️", "#d6bbff")
     with k5:
-        kpi("Nível de alerta", "Médio", "Risco moderado", "⚠️", "#ffd448")
+        kpi(
+            "Nível de alerta",
+            row["Nível de alerta"],
+            "Classificação do modelo",
+            "⚠️",
+            RISK_COLORS[row["Nível de alerta"]],
+        )
 
     st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
     left, center, right = st.columns([1.20, 1.10, 0.62], gap="large")
@@ -1521,7 +1794,8 @@ elif page == "Bairros":
             fig = go.Figure()
             fig.add_trace(go.Scatter(x=serie_bairro["Semana"], y=serie_bairro["Casos previstos"], name="Casos previstos", mode="lines+markers+text", text=serie_bairro["Casos previstos"], textposition="top center", line=dict(color="#1683ff", width=3)))
             fig.add_trace(go.Scatter(x=serie_bairro["Semana"], y=serie_bairro["Casos históricos"], name="Casos históricos", mode="lines+markers+text", text=serie_bairro["Casos históricos"], textposition="bottom center", line=dict(color="#16b6bd", width=3)))
-            fig.add_vrect(x0="SE 01", x1="SE 01", fillcolor="#dcecff", opacity=0.30, line_width=0)
+            current_week = serie_bairro["Semana"].iloc[-1]
+            fig.add_vrect(x0=current_week, x1=current_week, fillcolor="#dcecff", opacity=0.30, line_width=0)
             fig = apply_chart_layout(fig, height=315, showlegend=True)
             fig.update_yaxes(range=[0, 50], title="Casos")
             st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
@@ -1539,7 +1813,7 @@ elif page == "Bairros":
                     <div class="updates-icon" style="background:#ffe8e8;color:#f1283c;font-size:22px;">🌡️</div>
                     <div><b>Temperatura máxima</b><div style="font-size:27px;font-weight:950;color:#092b4c;">{br_float(row['Temp. max lag4'])} °C</div><span class="muted">Média das máximas em 4 semanas</span></div>
                 </div>
-                <div class="footer-note">Dados até a SE 2025-01</div>
+                <div class="footer-note">Dados até a SE {row['Semana']}</div>
                 """,
                 unsafe_allow_html=True,
             )
@@ -1548,8 +1822,11 @@ elif page == "Bairros":
     loc, tend, actions = st.columns([1.20, 1.00, 1.00], gap="large")
     with loc:
         with section("Localização", height=380, key="bairro_location", css_class="bairro-secondary-section"):
-            fig = small_location_map(row)
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+            if pd.notna(row["lat"]) and pd.notna(row["lon"]):
+                fig = small_location_map(row)
+                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+            else:
+                st.info("Localização indisponível. Inclua `lat` e `lon` na resposta da API.")
 
     with tend:
         with section("Tendência para as próximas semanas", height=380, key="bairro_trend", css_class="bairro-secondary-section"):
@@ -1590,48 +1867,40 @@ elif page == "Bairros":
 
 ### TELA 3
 elif page == "Hospitais":
-    topbar("risco")
+    filtered_hospitais = topbar(hospitais, "risco")
     page_title("Risco de Superlotação Hospitalar")
 
-    chip_l, chip_r = st.columns([1.0, 1.0])
-    with chip_r:
-        st.markdown(
-            """
-            <div class="chips">
-                <span class="chip">⚲ Limpar filtros</span>
-                <span class="chip">UF: SP ×</span>
-                <span class="chip">UF: RJ ×</span>
-                <span class="chip">UF: MG ×</span>
-                <span class="chip">+ Adicionar filtro</span>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+    hospital_count = len(filtered_hospitais)
+    critical_count = int((filtered_hospitais["Nível de risco"] == "Crítico").sum())
+    occupancy_mean = float(filtered_hospitais["Ocupação prevista"].mean())
+    patient_count = int(filtered_hospitais["Pacientes estimados"].sum())
 
-    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
     k1, k2, k3, k4, k5 = st.columns(5)
     with k1:
-        kpi("Hospitais monitorados", "1.248", "vs semana anterior", "🏥", "#1683ff", "↑ 6,3%", "trend-good")
+        kpi("Hospitais monitorados", br_int(hospital_count), "na seleção atual", "🏥", "#1683ff")
     with k2:
         kpi("Regiões em risco", "214", "vs semana anterior", "📍", "#8556e8", "↑ 8,1%", "trend-up")
     with k3:
-        kpi("Risco crítico", "68", "vs semana anterior", "⚠️", "#f1283c", "↑ 12,7%", "trend-up")
+        kpi("Risco crítico", br_int(critical_count), "hospitais", "⚠️", "#f1283c")
     with k4:
-        kpi("Ocupação média prevista", "84,6%", "vs semana anterior", "📈", "#12bfc9", "↑ 4,2 p.p.", "trend-up")
+        kpi("Ocupação média prevista", f"{br_float(occupancy_mean)}%", "na seleção atual", "📈", "#12bfc9")
     with k5:
-        kpi("Pacientes estimados", "18.732", "vs semana anterior", "👥", "#ff8618", "↑ 15,8%", "trend-up")
+        kpi("Pacientes estimados", br_int(patient_count), "na seleção atual", "👥", "#ff8618")
 
     st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
     col_map, col_rank = st.columns([1.15, 1.18], gap="large")
 
     with col_map:
         with section("Mapa de pressão assistencial no Brasil", height=500, key="hospital_map", css_class="map-section"):
-            fig = brazil_map(hospitais.rename(columns={"Nível de risco": "Nível de alerta", "Hospital / Região": "Bairro", "Pacientes estimados": "Casos previstos"}), "Nível de alerta", "Bairro", "Casos previstos")
+            fig = brazil_map(filtered_hospitais.rename(columns={"Nível de risco": "Nível de alerta", "Hospital / Região": "Bairro", "Pacientes estimados": "Casos previstos"}), "Nível de alerta", "Bairro", "Casos previstos")
             st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
     with col_rank:
         with section("Hospitais/Regiões com maior risco de superlotação", height=500, key="hospital_ranking", css_class="rank-section"):
-            st.markdown(ranking_table_hospitals(), unsafe_allow_html=True)
+            st.markdown(
+                ranking_table_hospitals(filtered_hospitais),
+                unsafe_allow_html=True,
+            )
 
     st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
     col_proj, col_demanda, col_pressao = st.columns([1.0, 0.75, 1.3], gap="large")
@@ -1668,10 +1937,11 @@ elif page == "Hospitais":
 
 ### TELA 4
 else:
-    topbar("alerta")
+    reports_bairros = topbar(bairros, "relatorio")
     page_title("Relatórios")
     with section("Tela prevista para desenvolvimento futuro", info=False):
         st.markdown(
             "Nesta área, futuramente poderão ser exibidos relatórios exportáveis por semana "
-            "epidemiológica, cidade, UF, bairro, nível de alerta e hospitais em risco."
+            "epidemiológica, cidade, UF, bairro, nível de alerta e hospitais em risco. "
+            f"A seleção atual contém {len(reports_bairros)} bairro(s)."
         )
