@@ -1,227 +1,89 @@
+import os
 import re
 import unicodedata
-from pathlib import Path
 
 import pandas as pd
-from sklearn.metrics import mean_absolute_error, mean_squared_error
+from sqlalchemy import create_engine
 import xgboost as xgb
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+from dotenv import load_dotenv
 
-RAW_DATA_DIR = Path("data/raw")
-READY_DIR = Path("data/ready")
-OUTPUT_PATH = READY_DIR / "dataset_recife_features.csv"
+load_dotenv()
 
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+def connect_to_database():
+    if not DATABASE_URL:
+        raise ValueError("Variável DATABASE_URL não encontrada no arquivo .env")
+    return create_engine(DATABASE_URL)
 
 def normalize_text(value: str) -> str:
-    """Normaliza nome de bairro pra conseguir fazer merge certinho."""
     if pd.isna(value):
         return ""
+    text_str = str(value).strip().lower()
+    text_str = unicodedata.normalize("NFKD", text_str)
+    text_str = "".join(ch for ch in text_str if not unicodedata.combining(ch))
+    text_str = re.sub(r"\s+", " ", text_str)
+    text_str = text_str.replace("(pe)", "").replace("- recife", "").replace("recife", "")
+    return text_str.strip()
 
-    text = str(value).strip().lower()
-    text = unicodedata.normalize("NFKD", text)
-    text = "".join(ch for ch in text if not unicodedata.combining(ch))
-    text = re.sub(r"\s+", " ", text)
-    text = text.replace("(pe)", "")
-    text = text.replace("- recife", "")
-    text = text.replace("recife", "")
-    text = text.strip()
-    return text
+def load_dengue_from_db(engine) -> pd.DataFrame:
+    query = """
+        SELECT nm_bairro, dt_notific 
+        FROM dengue 
+        WHERE nm_bairro IS NOT NULL AND dt_notific IS NOT NULL
+    """
+    dengue = pd.read_sql(query, engine)
+    dengue["dt_notific"] = pd.to_datetime(dengue["dt_notific"], errors="coerce")
+    dengue = dengue.dropna(subset=["dt_notific"])
 
+    epi_date = dengue["dt_notific"].dt.isocalendar()
+    dengue["epi_year"] = epi_date["year"].astype(int)
+    dengue["epi_week"] = epi_date["week"].astype(int)
 
-def _read_csv_with_encodings(path: Path, **kwargs) -> pd.DataFrame:
-    """Tenta ler CSV como UTF-8 e, se falhar, tenta latin1."""
-    for encoding in ["utf-8", "latin1"]:
-        try:
-            return pd.read_csv(path, encoding=encoding, **kwargs)
-        except Exception:
-            continue
-    raise ValueError(f"Unable to read CSV with utf-8 or latin1: {path}")
-
-
-def _find_header_skip(lines, marker: str):
-    for idx, line in enumerate(lines):
-        if marker in line:
-            return idx
-    return None
-
-
-def load_dengue_data(raw_dir: Path) -> pd.DataFrame:
-    """Carrega dados de dengue e agrupa por bairro e semana epidemiológica."""
-    dengue_files = sorted(set(raw_dir.glob("*casos-de-dengue*.csv")) | set(raw_dir.glob("*resources_*casos-de-dengue*.csv")))
-    if not dengue_files:
-        raise FileNotFoundError("Nenhum arquivo de dengue encontrado em data/raw.")
-
-    frames = []
-    for path in dengue_files:
-        df = _read_csv_with_encodings(path, sep=";", quotechar='"', engine="python")
-        df.columns = [str(col).strip().lower() for col in df.columns]
-        frames.append(df)
-
-    dengue = pd.concat(frames, ignore_index=True)
-    dengue = dengue.loc[:, ~dengue.columns.duplicated()].copy()
-
-    date_columns = [c for c in dengue.columns if c in {"dt_notific", "dt_notificacao", "dt_notificacao", "dt_notificao"}]
-    if date_columns:
-        date_col = date_columns[0]
-    else:
-        date_col = next((c for c in dengue.columns if "dt" in c and "not" in c), None)
-
-    bairro_columns = [c for c in dengue.columns if c in {"nm_bairro", "no_bairro_residencia", "nm_bairro_residencia"}]
-    if bairro_columns:
-        bairro_col = bairro_columns[0]
-    else:
-        raise KeyError("Não foi possível encontrar coluna de bairro nos arquivos de dengue.")
-
-    dengue[date_col] = pd.to_datetime(dengue[date_col].astype(str).str.strip(), dayfirst=True, errors="coerce")
-    dengue = dengue.dropna(subset=[date_col]).copy()
-    if dengue.empty:
-        raise ValueError("Falha ao converter datas de notificação de dengue.")
-
-    epi_date = dengue[date_col].dt.isocalendar()
-    dengue["epi_year"] = epi_date["year"]
-    dengue["epi_week"] = epi_date["week"]
-
-    dengue["bairro_norm"] = dengue[bairro_col].astype(str).apply(normalize_text)
-    dengue = dengue[dengue["bairro_norm"] != ""].copy()
+    dengue["bairro_norm"] = dengue["nm_bairro"].apply(normalize_text)
+    dengue = dengue[dengue["bairro_norm"] != ""]
 
     grouped = (
         dengue.groupby(["bairro_norm", "epi_year", "epi_week"], as_index=False)
         .size()
         .rename(columns={"size": "casos_totais"})
     )
-    grouped["bairro"] = grouped["bairro_norm"]
     return grouped
 
-
-def load_climate_data(raw_dir: Path) -> pd.DataFrame:
-    """Lê clima INMET, agrega por semana epi e cria lags de chuva/temperatura."""
-    inmet_path = next(raw_dir.glob("*dados_INMET*.csv"), None)
-    if inmet_path is None:
-        raise FileNotFoundError("Arquivo INMET não encontrado em data/raw.")
-
-    with inmet_path.open("r", encoding="utf-8", errors="ignore") as handle:
-        lines = handle.readlines()
-
-    header_skip = _find_header_skip(lines, "Data Medicao")
-    if header_skip is None:
-        raise ValueError("Cabeçalho de INMET não encontrado no arquivo.")
-
-    climate = _read_csv_with_encodings(inmet_path, sep=";", skiprows=header_skip, engine="python")
-    climate.columns = [str(col).strip() for col in climate.columns]
-
-    date_col = next((c for c in climate.columns if "data" in c.lower()), None)
-    precip_col = next((c for c in climate.columns if "precipitacao" in c.lower()), None)
-    temp_max_col = next((c for c in climate.columns if "temperatura maxima" in c.lower()), None)
-
-    if not {date_col, precip_col, temp_max_col}:
-        raise KeyError("Colunas obrigatórias de clima não foram encontradas.")
-
-    climate[date_col] = pd.to_datetime(climate[date_col].astype(str).str.strip(), dayfirst=True, errors="coerce")
-    climate = climate.dropna(subset=[date_col]).copy()
-
-    climate[precip_col] = pd.to_numeric(climate[precip_col].astype(str).str.replace(",", "."), errors="coerce")
-    climate[temp_max_col] = pd.to_numeric(climate[temp_max_col].astype(str).str.replace(",", "."), errors="coerce")
-
-    iso = climate[date_col].dt.isocalendar()
-    climate["epi_year"] = iso["year"].astype(int)
-    climate["epi_week"] = iso["week"].astype(int)
-
-    weekly = (
-        climate.groupby(["epi_year", "epi_week"], as_index=False)
-        .agg(
-            precipitacao_total=(precip_col, "sum"),
-            temp_max_media=(temp_max_col, "mean"),
-        )
-    )
-    weekly = weekly.sort_values(["epi_year", "epi_week"]).reset_index(drop=True)
-
-    for lag in range(1, 5):
-        weekly[f"chuva_lag{lag}"] = weekly["precipitacao_total"].shift(lag)
-        weekly[f"temp_max_lag{lag}"] = weekly["temp_max_media"].shift(lag)
-
-    return weekly
-
-
-def load_population_data(raw_dir: Path) -> pd.DataFrame:
-    """Carrega população IBGE e ajeita os nomes de bairro."""
-    ibge_path = raw_dir / "sidra-ibge-recife-2022.csv"
-    if not ibge_path.exists():
-        raise FileNotFoundError("Arquivo de população IBGE não encontrado em data/raw.")
-
-    with ibge_path.open("r", encoding="utf-8", errors="ignore") as handle:
-        lines = handle.readlines()
-
-    header_skip = None
-    for idx, line in enumerate(lines):
-        if "Brasil e Bairro" in line and ("Total" in line or "2022" in line):
-            header_skip = idx
-            break
-    if header_skip is None:
-        raise ValueError("Cabeçalho do IBGE não encontrado no arquivo.")
-
-    population = _read_csv_with_encodings(ibge_path, sep=";", skiprows=header_skip, engine="python")
-    population.columns = [str(col).strip() for col in population.columns]
-
-    if "Total" in population.columns:
-        population = population.rename(columns={"Cód.": "cod", "Brasil e Bairro": "bairro", "Total": "populacao"})
-    elif "2022" in population.columns:
-        population = population.rename(columns={"Cód.": "cod", "Brasil e Bairro": "bairro", "2022": "populacao"})
-    else:
-        raise KeyError("Coluna de população não encontrada no IBGE.")
-
-    population = population.loc[population["bairro"].astype(str).str.lower() != "brasil"].copy()
-
-    def simplify_bairro(name: str) -> str:
-        if not isinstance(name, str):
-            return ""
-        match = re.match(r"^(.*?) - Recife", name, flags=re.IGNORECASE)
-        if match:
-            return match.group(1).strip()
-        return name.strip()
-
-    population["bairro"] = population["bairro"].astype(str).apply(simplify_bairro)
-    population["bairro_norm"] = population["bairro"].apply(normalize_text)
-    population["populacao"] = pd.to_numeric(population["populacao"].astype(str).str.replace("\"", ""), errors="coerce")
-    population = population.dropna(subset=["populacao", "bairro_norm"]).copy()
-    population["populacao"] = population["populacao"].astype(int)
-
-    return population[["bairro_norm", "populacao"]].drop_duplicates(subset=["bairro_norm"])
-
-
 def build_features() -> pd.DataFrame:
-    """Monta o DataFrame final juntando dengue, IBGE e clima."""
-    dengue = load_dengue_data(RAW_DATA_DIR)
-    population = load_population_data(RAW_DATA_DIR)
-    climate = load_climate_data(RAW_DATA_DIR)
+    engine = connect_to_database()
 
-    merged = dengue.merge(population, how="left", left_on="bairro_norm", right_on="bairro_norm")
-    merged = merged.dropna(subset=["populacao"]).copy()
+    df_dengue = load_dengue_from_db(engine)
+    print(f"[DEBUG] Linhas em Dengue apos agrupar: {len(df_dengue)}")
 
-    final = merged.merge(climate, how="left", on=["epi_year", "epi_week"])
+    df_pop = pd.read_sql("SELECT LOWER(bairro_norm) as bairro_norm, populacao FROM ibge_populacao_bairro", engine)
+    print(f"[DEBUG] Linhas em IBGE Populacao: {len(df_pop)}")
+
+    df_clima = pd.read_sql("SELECT * FROM inmet_semanal_recife", engine)
+    print(f"[DEBUG] Linhas em Clima INMET: {len(df_clima)}")
+
+    merged = df_dengue.merge(df_pop, how="left", on="bairro_norm")
+    print(f"[DEBUG] Linhas apos merge com IBGE (antes do dropna): {len(merged)}")
+
+    merged = merged.dropna(subset=["populacao"])
+    print(f"[DEBUG] Linhas apos apagar bairros sem match de populacao: {len(merged)}")
+
+    final = merged.merge(df_clima, how="left", on=["epi_year", "epi_week"])
+    
     final["taxa_incidencia_100k"] = (final["casos_totais"] / final["populacao"]) * 100_000
     final = final.sort_values(["bairro_norm", "epi_year", "epi_week"]).reset_index(drop=True)
+    
     return final
 
-
 def train_baseline_model(df_final: pd.DataFrame) -> xgb.XGBRegressor:
-    """Treina o XGBoost baseline e mostra as métricas na tela."""
     feature_columns = [
-        "populacao",
-        "epi_year",
-        "epi_week",
-        "precipitacao_total",
-        "temp_max_media",
-        "chuva_lag1",
-        "chuva_lag2",
-        "chuva_lag3",
-        "chuva_lag4",
-        "temp_max_lag1",
-        "temp_max_lag2",
-        "temp_max_lag3",
-        "temp_max_lag4",
+        "populacao", "epi_year", "epi_week", "precipitacao_total", "temp_max_media",
+        "chuva_lag1", "chuva_lag2", "chuva_lag3", "chuva_lag4",
+        "temp_max_lag1", "temp_max_lag2", "temp_max_lag3", "temp_max_lag4"
     ]
 
-    df_model = df_final.copy()
-    df_model = df_model.dropna(subset=["populacao", "casos_totais"]).reset_index(drop=True)
+    df_model = df_final.dropna(subset=["populacao", "casos_totais"]).reset_index(drop=True)
 
     train_mask = df_model["epi_year"] <= 2024
     test_mask = df_model["epi_year"] == 2025
@@ -231,10 +93,8 @@ def train_baseline_model(df_final: pd.DataFrame) -> xgb.XGBRegressor:
     X_test = df_model.loc[test_mask, feature_columns]
     y_test = df_model.loc[test_mask, "casos_totais"]
 
-    if X_train.empty:
-        raise ValueError("Não há dados de treinamento antes de 2025.")
-    if X_test.empty:
-        raise ValueError("Não há dados de validação para 2025.")
+    if X_train.empty or X_test.empty:
+        raise ValueError("Dados insuficientes para treino ou teste. Verifique o range de anos e os joins climáticos.")
 
     model = xgb.XGBRegressor(
         objective="reg:squarederror",
@@ -249,8 +109,8 @@ def train_baseline_model(df_final: pd.DataFrame) -> xgb.XGBRegressor:
     mae = mean_absolute_error(y_test, y_pred)
     rmse = mean_squared_error(y_test, y_pred) ** 0.5
 
-    print("Baseline XGBoost model trained")
-    print(f"Treino: {len(X_train)} linhas | Validação 2025: {len(X_test)} linhas")
+    print("Baseline XGBoost model trained via Supabase")
+    print(f"Treino: {len(X_train)} linhas | Validacao 2025: {len(X_test)} linhas")
     print(f"MAE: {mae:.2f}")
     print(f"RMSE: {rmse:.2f}")
 
@@ -262,16 +122,11 @@ def train_baseline_model(df_final: pd.DataFrame) -> xgb.XGBRegressor:
 
     return model
 
-
-def main() -> None:
-    READY_DIR.mkdir(parents=True, exist_ok=True)
-    print("Construindo features baselines para dengue em Recife...")
+def main():
+    print("Extraindo dados do Supabase e construindo features...")
     df_final = build_features()
-    print(f"DataFrame final construído com {len(df_final)} linhas.")
-    df_final.to_csv(OUTPUT_PATH, index=False)
-    print(f"Dataset salvo em: {OUTPUT_PATH}")
+    print(f"DataFrame final construido com {len(df_final)} linhas.")
     train_baseline_model(df_final)
-
 
 if __name__ == "__main__":
     main()
