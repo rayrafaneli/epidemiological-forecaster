@@ -94,7 +94,7 @@ def train_baseline_model(df_final: pd.DataFrame) -> xgb.XGBRegressor:
     y_test = df_model.loc[test_mask, "casos_totais"]
 
     if X_train.empty or X_test.empty:
-        raise ValueError("Dados insuficientes para treino ou teste. Verifique o range de anos e os joins climáticos.")
+        raise ValueError("Dados insuficientes para treino ou teste. Verifique o range de anos e os joins climaticos.")
 
     model = xgb.XGBRegressor(
         objective="reg:squarederror",
@@ -119,6 +119,11 @@ def train_baseline_model(df_final: pd.DataFrame) -> xgb.XGBRegressor:
     print("Top 5 features mais importantes:")
     for feature, importance in top_features.items():
         print(f"- {feature}: {importance:.4f}")
+
+    # Salva o arquivo fisico na raiz do projeto
+    model_path = "model_xgb_recife.json"
+    model.save_model(model_path)
+    print(f"Modelo salvo com sucesso em: {model_path}")
 
     return model
 
