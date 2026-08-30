@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import requests
 import plotly.graph_objects as go
 import plotly.express as px
 import streamlit.components.v1 as components
@@ -545,7 +546,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-### dados teste
+### dados API
 RISK_COLORS = {
     "Baixo": "#20c665",
     "Médio": "#ffd448",
@@ -555,27 +556,76 @@ RISK_COLORS = {
 
 RISK_ORDER = ["Baixo", "Médio", "Alto", "Crítico"]
 
-bairros = pd.DataFrame(
-    [
-        ["2611606002", "Afogados", "PE", "Recife", "2025-01", 35400, 48.1, 31.2, 42, 38, 118.6, "Crítico", -8.0785, -34.9086],
-        ["2611606003", "Cohab", "PE", "Recife", "2025-01", 37610, 51.8, 31.1, 36, 31, 95.7, "Alto", -8.1184, -34.9535],
-        ["2611606004", "Ibura", "PE", "Recife", "2025-01", 37740, 50.5, 31.4, 28, 24, 74.2, "Alto", -8.1160, -34.9360],
-        ["2611606005", "Jordão", "PE", "Recife", "2025-01", 34700, 44.3, 30.9, 22, 20, 63.4, "Alto", -8.1300, -34.9250],
-        ["2611606001", "Boa Viagem", "PE", "Recife", "2025-01", 122922, 45.2, 31.5, 14, 12, 11.3, "Médio", -8.1260, -34.9000],
-        ["2611606006", "Casa Amarela", "PE", "Recife", "2025-01", 127500, 42.0, 31.0, 13, 10, 10.2, "Médio", -8.0265, -34.9170],
-        ["2611606007", "Imbiribeira", "PE", "Recife", "2025-01", 120800, 39.2, 31.8, 11, 8, 9.1, "Médio", -8.1050, -34.9100],
-        ["3304557001", "Campo Grande", "RJ", "Rio de Janeiro", "2025-01", 328370, 74.4, 32.2, 10, 9, 8.7, "Médio", -22.9028, -43.5614],
-        ["3550308001", "Cidade Tiradentes", "SP", "São Paulo", "2025-01", 211501, 82.0, 29.8, 72, 63, 34.0, "Alto", -23.5850, -46.3980],
-        ["5300108001", "Ceilândia", "DF", "Brasília", "2025-01", 432927, 90.1, 30.5, 95, 81, 21.9, "Crítico", -15.8194, -48.1083],
-        ["1302603001", "Cidade Nova", "AM", "Manaus", "2025-01", 121135, 105.2, 32.6, 54, 49, 44.6, "Alto", -3.0330, -60.0000],
-        ["2304400001", "Messejana", "CE", "Fortaleza", "2025-01", 41000, 68.3, 31.8, 31, 26, 75.6, "Alto", -3.8320, -38.4940],
-        ["4314902001", "Restinga", "RS", "Porto Alegre", "2025-01", 60000, 52.0, 28.4, 18, 16, 30.0, "Médio", -30.1500, -51.1800],
-    ],
-    columns=[
-        "bairro_id", "Bairro", "UF", "Cidade", "Semana", "População", "Chuva lag4", "Temp. max lag4",
+
+@st.cache_data(ttl=3600)
+def fetch_bairros_data():
+    expected_columns = [
+        "Bairro", "UF", "Cidade", "Semana", "População", "Chuva lag4", "Temp. max lag4",
         "Casos previstos", "Casos históricos", "Incidência por 100 mil", "Nível de alerta", "lat", "lon"
-    ],
-)
+    ]
+    url = "https://epidemiological-forecaster.onrender.com/predict/recife?ano=2025&semana=1"
+
+    try:
+        response = requests.get(url, timeout=30)
+        if response.status_code != 200:
+            return pd.DataFrame(columns=expected_columns)
+
+        payload = response.json()
+        if isinstance(payload, dict):
+            payload = payload.get("data", payload.get("results", []))
+        if not isinstance(payload, list):
+            payload = []
+
+        if not payload:
+            return pd.DataFrame(columns=expected_columns)
+
+        df = pd.DataFrame(payload)
+        rename_map = {
+            "bairro_norm": "Bairro",
+            "casos_previstos": "Casos previstos",
+            "incidencia_100k": "Incidência por 100 mil",
+            "nivel_alerta": "Nível de alerta",
+        }
+        df = df.rename(columns=rename_map)
+
+        if "Bairro" in df.columns:
+            df["Bairro"] = df["Bairro"].fillna("").astype(str).str.title()
+
+        for col, default in {
+            "UF": "PE",
+            "Cidade": "Recife",
+            "Semana": "2025-01",
+            "Chuva lag4": 0.0,
+            "Temp. max lag4": 0.0,
+            "População": 0,
+            "Casos previstos": 0,
+            "Casos históricos": 0,
+            "Incidência por 100 mil": 0.0,
+            "Nível de alerta": "Baixo",
+        }.items():
+            if col not in df.columns:
+                df[col] = default
+
+        if "lat" not in df.columns:
+            df["lat"] = -8.0500 + (df.index % 6) * 0.005
+        if "lon" not in df.columns:
+            df["lon"] = -34.9000 + (df.index % 6) * 0.006
+
+        df["UF"] = df["UF"].fillna("PE").astype(str).str.upper()
+        df["Cidade"] = df["Cidade"].fillna("Recife").astype(str).str.title()
+        df["Semana"] = df["Semana"].fillna("2025-01").astype(str)
+        df["Chuva lag4"] = pd.to_numeric(df["Chuva lag4"], errors="coerce").fillna(0.0)
+        df["Temp. max lag4"] = pd.to_numeric(df["Temp. max lag4"], errors="coerce").fillna(0.0)
+        df["Casos previstos"] = pd.to_numeric(df["Casos previstos"], errors="coerce").fillna(0)
+        df["Casos históricos"] = pd.to_numeric(df["Casos históricos"], errors="coerce").fillna(0)
+        df["Incidência por 100 mil"] = pd.to_numeric(df["Incidência por 100 mil"], errors="coerce").fillna(0.0)
+        df["lat"] = pd.to_numeric(df["lat"], errors="coerce").fillna(-8.0500)
+        df["lon"] = pd.to_numeric(df["lon"], errors="coerce").fillna(-34.9000)
+
+        return df.reindex(columns=expected_columns)
+
+    except Exception:
+        return pd.DataFrame(columns=expected_columns)
 
 serie_casos = pd.DataFrame(
     {
@@ -1411,6 +1461,9 @@ menu = st.sidebar.radio(
 )
 page = "Dashboard" if "Dashboard" in menu else "Bairros" if "Bairros" in menu else "Hospitais" if "Hospitais" in menu else "Relatórios"
 
+with st.spinner("Conectando ao modelo preditivo..."):
+    bairros = fetch_bairros_data()
+
 st.sidebar.markdown("<br><br><br><br>", unsafe_allow_html=True)
 st.sidebar.caption("Versão 1.0.0")
 st.sidebar.caption("© 2026 SIPD")
@@ -1437,7 +1490,7 @@ if page == "Dashboard":
     with col_map:
         with section("Mapa de calor — Risco de dengue no Brasil", height=500, key="dashboard_map", css_class="map-section"):
             fig_map = brazil_map(bairros, "Nível de alerta", "Bairro", "Casos previstos")
-            st.plotly_chart(fig_map, use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(fig_map, width="stretch", config={"displayModeBar": False})
 
     with col_rank:
         with section("Bairros com maior risco", height=500, key="dashboard_ranking", css_class="rank-section"):
@@ -1451,7 +1504,7 @@ if page == "Dashboard":
             fig = go.Figure()
             fig.add_trace(go.Scatter(x=serie_casos["Semana"], y=serie_casos["Casos previstos"], mode="lines+markers+text", text=serie_casos["Casos previstos"], textposition="top center", line=dict(color="#1683ff", width=3), marker=dict(size=8)))
             fig = apply_chart_layout(fig, height=290, showlegend=False)
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
     with col_clima:
         with section("Influência climática", height=370, key="dashboard_climate", css_class="chart-section"):
@@ -1463,7 +1516,7 @@ if page == "Dashboard":
                 yaxis2=dict(title="°C", overlaying="y", side="right", range=[20, 36]),
             )
             fig = apply_chart_layout(fig, height=290, showlegend=True)
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
     with col_update:
         with section("Últimas atualizações do modelo", height=370, key="dashboard_updates", css_class="updates-section"):
@@ -1529,7 +1582,7 @@ elif page == "Bairros":
             fig.add_vrect(x0="SE 01", x1="SE 01", fillcolor="#dcecff", opacity=0.30, line_width=0)
             fig = apply_chart_layout(fig, height=315, showlegend=True)
             fig.update_yaxes(range=[0, 50], title="Casos")
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
     with right:
         with section("Variáveis climáticas (lag4)", height=440, key="bairro_climate", css_class="bairro-main-section bairro-climate-section"):
@@ -1554,7 +1607,7 @@ elif page == "Bairros":
     with loc:
         with section("Localização", height=380, key="bairro_location", css_class="bairro-secondary-section"):
             fig = small_location_map(row)
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
     with tend:
         with section("Tendência para as próximas semanas", height=380, key="bairro_trend", css_class="bairro-secondary-section"):
@@ -1632,7 +1685,7 @@ elif page == "Hospitais":
     with col_map:
         with section("Mapa de pressão assistencial no Brasil", height=500, key="hospital_map", css_class="map-section"):
             fig = brazil_map(hospitais.rename(columns={"Nível de risco": "Nível de alerta", "Hospital / Região": "Bairro", "Pacientes estimados": "Casos previstos"}), "Nível de alerta", "Bairro", "Casos previstos")
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
     with col_rank:
         with section("Hospitais/Regiões com maior risco de superlotação", height=500, key="hospital_ranking", css_class="rank-section"):
@@ -1648,7 +1701,7 @@ elif page == "Hospitais":
             fig.add_trace(go.Scatter(x=ocupacao_semanal["Semana"], y=ocupacao_semanal["Ocupação prevista"], mode="lines+markers+text", name="Ocupação prevista", text=[f"{v}%" for v in ocupacao_semanal["Ocupação prevista"]], textposition="top center", line=dict(color="#f1283c", width=2, dash="dash")))
             fig = apply_chart_layout(fig, height=305, showlegend=True)
             fig.update_yaxes(range=[0, 125], title="% ocupação", ticksuffix="%")
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
     with col_demanda:
         with section("Demanda esperada por região", height=410, key="hospital_demand", css_class="hospital-chart-section"):
@@ -1656,7 +1709,7 @@ elif page == "Hospitais":
             fig.update_traces(texttemplate="%{text:,}", textposition="outside")
             fig = apply_chart_layout(fig, height=305, showlegend=False)
             fig.update_layout(yaxis=dict(categoryorder="total ascending"))
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
     with col_pressao:
         with section(
