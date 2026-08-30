@@ -806,20 +806,25 @@ def brazil_map(df, level_col, hover_name, size_col, title="", show_legend=True):
     )
 
     fig.add_trace(
-        go.Densitymapbox(
+        go.Scattermap(
             lat=map_df["lat"],
             lon=map_df["lon"],
-            z=map_df["heat_weight"],
-            radius=48,
-            opacity=0.50,
-            colorscale=[
-                [0.00, "rgba(32,198,101,0.06)"],
-                [0.22, "#20c665"],
-                [0.48, "#ffd448"],
-                [0.72, "#ff8618"],
-                [1.00, "#f1283c"],
-            ],
-            showscale=False,
+            mode="markers",
+            marker=dict(
+                size=18,
+                color=map_df["heat_weight"],
+                colorscale=[
+                    [0.00, "rgba(32,198,101,0.06)"],
+                    [0.22, "#20c665"],
+                    [0.48, "#ffd448"],
+                    [0.72, "#ff8618"],
+                    [1.00, "#f1283c"],
+                ],
+                cmin=0,
+                cmax=max_size * max(risk_weight.values()),
+                opacity=0.55,
+                showscale=False,
+            ),
             hoverinfo="skip",
         )
     )
@@ -833,7 +838,7 @@ def brazil_map(df, level_col, hover_name, size_col, title="", show_legend=True):
         customdata = temp[[size_col, level_col]].to_numpy()
 
         fig.add_trace(
-            go.Scattermapbox(
+            go.Scattermap(
                 lat=temp["lat"],
                 lon=temp["lon"],
                 mode="markers",
@@ -861,7 +866,7 @@ def brazil_map(df, level_col, hover_name, size_col, title="", show_legend=True):
         paper_bgcolor="#ffffff",
         plot_bgcolor="#ffffff",
         showlegend=False,
-        mapbox=dict(
+        map=dict(
             style="carto-positron",
             center=dict(lat=-14.3, lon=-52.0),
             zoom=3.05,
@@ -923,7 +928,7 @@ def small_location_map(row):
     fig = go.Figure()
 
     fig.add_trace(
-        go.Scattermapbox(
+        go.Scattermap(
             lat=[row["lat"]],
             lon=[row["lon"]],
             mode="markers+text",
@@ -948,7 +953,7 @@ def small_location_map(row):
         margin=dict(l=0, r=0, t=0, b=0),
         paper_bgcolor="#ffffff",
         plot_bgcolor="#ffffff",
-        mapbox=dict(
+        map=dict(
             style="carto-positron",
             center=dict(lat=float(row["lat"]), lon=float(row["lon"])),
             zoom=11,
