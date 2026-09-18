@@ -1,0 +1,77 @@
+{
+  "modelo": "XGBoost",
+  "versao_modelo": "criticidade_producao_2015_2021",
+  "treino_inicio": 2015,
+  "treino_fim": 2021,
+  "gerado_em": "2026-09-18T13:56:06-03:00",
+  "horizontes": {
+    "1": {
+      "amostras_treino": 33558,
+      "arvores": 593,
+      "parametros": {
+        "learning_rate": 0.035,
+        "max_depth": 5,
+        "min_child_weight": 2,
+        "gamma": 0.0,
+        "subsample": 0.85,
+        "colsample_bytree": 0.85,
+        "reg_lambda": 2.0,
+        "reg_alpha": 0.05,
+        "weight_power": 0.75
+      },
+      "modelo": "xgboost_criticidade_h1.json",
+      "preprocessador": "preprocessador_xgboost_criticidade_h1.joblib"
+    },
+    "2": {
+      "amostras_treino": 33464,
+      "arvores": 572,
+      "parametros": {
+        "learning_rate": 0.02,
+        "max_depth": 5,
+        "min_child_weight": 2,
+        "gamma": 0.5,
+        "subsample": 1.0,
+        "colsample_bytree": 0.85,
+        "reg_lambda": 5.0,
+        "reg_alpha": 0.2,
+        "weight_power": 1.0
+      },
+      "modelo": "xgboost_criticidade_h2.json",
+      "preprocessador": "preprocessador_xgboost_criticidade_h2.joblib"
+    },
+    "3": {
+      "amostras_treino": 33370,
+      "arvores": 494,
+      "parametros": {
+        "learning_rate": 0.08,
+        "max_depth": 3,
+        "min_child_weight": 8,
+        "gamma": 0.5,
+        "subsample": 0.7,
+        "colsample_bytree": 1.0,
+        "reg_lambda": 5.0,
+        "reg_alpha": 1.0,
+        "weight_power": 0.75
+      },
+      "modelo": "xgboost_criticidade_h3.json",
+      "preprocessador": "preprocessador_xgboost_criticidade_h3.joblib"
+    },
+    "4": {
+      "amostras_treino": 33276,
+      "arvores": 493,
+      "parametros": {
+        "learning_rate": 0.08,
+        "max_depth": 3,
+        "min_child_weight": 8,
+        "gamma": 0.5,
+        "subsample": 0.7,
+        "colsample_bytree": 1.0,
+        "reg_lambda": 5.0,
+        "reg_alpha": 1.0,
+        "weight_power": 0.75
+      },
+      "modelo": "xgboost_criticidade_h4.json",
+      "preprocessador": "preprocessador_xgboost_criticidade_h4.joblib"
+    }
+  }
+}

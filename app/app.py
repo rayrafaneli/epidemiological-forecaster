@@ -1,1735 +1,622 @@
-import streamlit as st
-import pandas as pd
-import requests
-import plotly.graph_objects as go
-import plotly.express as px
-import streamlit.components.v1 as components
-from contextlib import contextmanager
+"""Interface Streamlit do Epidemiological Forecaster."""
 
-# Requer Streamlit 1.40 ou superior para st.container(height=...).
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import requests
+import streamlit as st
+from dotenv import load_dotenv
+
+
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+
 
 st.set_page_config(
-    page_title="Sistema Inteligente de Predição de Dengue",
+    page_title="Epidemiological Forecaster",
     page_icon="🦟",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-### CSS
-st.markdown(
-    """
-    <style>
-        :root {
-            --bg: #f5f8fc;
-            --panel: #ffffff;
-            --border: #dfe9f5;
-            --text: #092b4c;
-            --muted: #65768a;
-            --blue: #1683ff;
-            --blue-2: #0b68d8;
-            --cyan: #13bfcf;
-            --green: #20c665;
-            --yellow: #ffd448;
-            --orange: #ff8618;
-            --red: #f1283c;
-            --purple: #8556e8;
-            --sidebar: #06243d;
-        }
-
-        .stApp {
-            background: var(--bg);
-            font-family: "Inter", "Segoe UI", Arial, sans-serif;
-        }
-
-        .main .block-container {
-            padding-top: 1.0rem;
-            padding-left: 1.35rem;
-            padding-right: 1.35rem;
-            max-width: 100%;
-        }
-
-        header[data-testid="stHeader"] {
-            height: 0;
-            min-height: 0;
-            background: transparent;
-        }
-
-        #MainMenu, footer,
-        div[data-testid="stToolbar"],
-        div[data-testid="stDecoration"],
-        div[data-testid="stStatusWidget"] {
-            display: none !important;
-            visibility: hidden !important;
-        }
-
-        [data-testid="stSidebar"] {
-            background: radial-gradient(circle at 70% 82%, rgba(20, 132, 255, 0.24), rgba(20, 132, 255, 0) 30%),
-                        linear-gradient(180deg, #082f50 0%, #05243e 45%, #031a2d 100%);
-            border-right: 1px solid rgba(255, 255, 255, 0.08);
-            width: 198px !important;
-            min-width: 198px !important;
-            max-width: 198px !important;
-        }
-
-        [data-testid="stSidebar"] > div:first-child {
-            width: 198px !important;
-            min-width: 198px !important;
-            max-width: 198px !important;
-        }
-
-        [data-testid="stSidebar"] * {
-            color: #ffffff !important;
-        }
-
-        [data-testid="stSidebar"] .stRadio > label {
-            display: none;
-        }
-
-        [data-testid="stSidebar"] div[role="radiogroup"] > label {
-            padding: 13px 14px;
-            margin: 7px 0px;
-            border-radius: 12px;
-            transition: all .15s ease-in-out;
-            color: #ffffff !important;
-            font-weight: 700;
-        }
-
-        [data-testid="stSidebar"] div[role="radiogroup"] > label:hover {
-            background: rgba(255,255,255,0.10);
-        }
-
-        [data-testid="stSidebar"] div[role="radiogroup"] > label[data-baseweb="radio"] div:first-child {
-            display: none;
-        }
-
-        [data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:checked) {
-            background: linear-gradient(135deg, #1683ff, #0b68d8);
-            box-shadow: 0 10px 26px rgba(22, 131, 255, 0.36);
-        }
-
-        h1, h2, h3, h4, h5, h6 {
-            color: var(--text) !important;
-            letter-spacing: -0.02em;
-        }
-
-        .topbar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 20px;
-            min-height: 58px;
-            padding: 2px 4px 12px 4px;
-            border-bottom: 1px solid rgba(206, 219, 234, 0.85);
-            margin-bottom: 16px;
-        }
-
-        .topbar-title {
-            font-size: 24px;
-            line-height: 1.15;
-            font-weight: 900;
-            color: var(--text);
-            white-space: nowrap;
-        }
-
-        .topbar-controls {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            flex-wrap: wrap;
-            justify-content: flex-end;
-        }
-
-        .fake-select {
-            min-width: 120px;
-            height: 42px;
-            background: #fff;
-            border: 1px solid #dbe6f2;
-            border-radius: 10px;
-            padding: 6px 12px;
-            box-shadow: 0 2px 8px rgba(20, 45, 75, 0.04);
-            color: var(--text);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 10px;
-            font-weight: 700;
-            font-size: 12px;
-        }
-
-        .fake-select.large {
-            min-width: 210px;
-        }
-
-        .fake-select span {
-            display: block;
-            font-size: 11px;
-            color: #315170;
-            font-weight: 800;
-            margin-bottom: 1px;
-        }
-
-        .bell {
-            position: relative;
-            font-size: 23px;
-            color: #15395d;
-            padding: 4px 8px;
-        }
-
-        .bell-badge {
-            position: absolute;
-            right: 2px;
-            top: 0px;
-            width: 17px;
-            height: 17px;
-            background: #0d76ee;
-            color: white;
-            border-radius: 50%;
-            font-size: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: 900;
-        }
-
-        .page-title-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin: 4px 0 16px 0;
-        }
-
-        .page-title {
-            font-size: 25px;
-            font-weight: 900;
-            color: var(--text);
-        }
-
-        .breadcrumb {
-            font-size: 13px;
-            color: #4f6380;
-            margin-left: 18px;
-            font-weight: 700;
-        }
-
-        .btn-outline {
-            display: inline-flex;
-            gap: 8px;
-            align-items: center;
-            padding: 10px 16px;
-            border-radius: 10px;
-            border: 1px solid #cfdceb;
-            color: #147af3;
-            background: #fff;
-            font-weight: 800;
-            box-shadow: 0 3px 10px rgba(20, 45, 75, 0.05);
-        }
-
-        .card {
-            background: var(--panel);
-            border: 1px solid var(--border);
-            border-radius: 16px;
-            box-shadow: 0 8px 22px rgba(17, 42, 70, 0.07);
-        }
-
-        .kpi-card {
-            height: 122px;
-            padding: 18px 18px;
-            display: flex;
-            align-items: center;
-            gap: 16px;
-            background: var(--panel);
-            border: 1px solid var(--border);
-            border-radius: 16px;
-            box-shadow: 0 8px 22px rgba(17, 42, 70, 0.07);
-            overflow: hidden;
-            position: relative;
-        }
-
-        .kpi-card::after {
-            content: "";
-            position: absolute;
-            left: 14px;
-            right: 14px;
-            bottom: 0px;
-            height: 3px;
-            border-radius: 20px 20px 0 0;
-            background: var(--accent, #1683ff);
-            opacity: .8;
-        }
-
-        .kpi-icon {
-            width: 58px;
-            height: 58px;
-            min-width: 58px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: var(--accent, #1683ff);
-            color: white;
-            font-size: 28px;
-            box-shadow: 0 8px 20px rgba(22, 131, 255, 0.22);
-        }
-
-        .kpi-title {
-            color: var(--text);
-            font-weight: 900;
-            font-size: 14px;
-            margin-bottom: 4px;
-        }
-
-        .kpi-value {
-            color: #081e35;
-            font-size: 29px;
-            font-weight: 950;
-            line-height: 1.05;
-            margin-bottom: 5px;
-        }
-
-        .kpi-sub {
-            color: var(--muted);
-            font-size: 12px;
-            font-weight: 650;
-        }
-
-        .trend-up { color: var(--red); font-weight: 900; }
-        .trend-down { color: #14aa64; font-weight: 900; }
-        .trend-good { color: #14aa64; font-weight: 900; }
-        .trend-orange { color: var(--orange); font-weight: 900; }
-
-        .panel-title {
-            font-size: 16px;
-            font-weight: 950;
-            color: var(--text);
-            margin: 0 0 14px 0;
-        }
-
-        .panel-card {
-            background: var(--panel);
-            border: 1px solid var(--border);
-            border-radius: 16px;
-            box-shadow: 0 8px 22px rgba(17, 42, 70, 0.07);
-            padding: 16px;
-            min-height: 100px;
-        }
-
-        /*
-           Cards de conteúdo. A altura não é mais controlada com seletores CSS
-           baseados em :has(). Cada st.container recebe height diretamente no
-           Python, o que garante a mesma altura para todos os cards da linha.
-        */
-        .sipd-section-marker {
-            display: none !important;
-        }
-
-        div[data-testid="stVerticalBlockBorderWrapper"] {
-            box-sizing: border-box !important;
-            background: #ffffff !important;
-            border: 1px solid var(--border) !important;
-            border-radius: 16px !important;
-            box-shadow: 0 8px 22px rgba(17, 42, 70, 0.07) !important;
-        }
-
-        div[data-testid="stVerticalBlockBorderWrapper"] > div,
-        div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stVerticalBlock"],
-        div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stElementContainer"],
-        div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stMarkdownContainer"] {
-            background-color: #ffffff !important;
-        }
-
-        div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stVerticalBlock"] {
-            gap: 0.45rem;
-        }
-
-        div[data-testid="stVerticalBlockBorderWrapper"] .stPlotlyChart {
-            margin-top: -0.30rem;
-            margin-bottom: -0.15rem;
-        }
-
-        div[data-testid="stVerticalBlockBorderWrapper"] iframe {
-            border-radius: 12px;
-        }
-
-        /* Barra de rolagem discreta, exibida somente se algum conteúdo exceder o card. */
-        div[data-testid="stVerticalBlockBorderWrapper"] ::-webkit-scrollbar {
-            width: 6px;
-            height: 6px;
-        }
-
-        div[data-testid="stVerticalBlockBorderWrapper"] ::-webkit-scrollbar-thumb {
-            background: #c9d8e8;
-            border-radius: 999px;
-        }
-
-        .rank-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 12px;
-            color: var(--text);
-            background: #ffffff;
-            border: 0 !important;
-        }
-
-        .rank-table th {
-            padding: 10px 9px;
-            border-left: 0 !important;
-            border-right: 0 !important;
-            text-align: left;
-            background: #f7faff;
-            color: #0d3155;
-            border-bottom: 1px solid #dfe8f2;
-            font-weight: 950;
-        }
-
-        .rank-table td {
-            padding: 9px 9px;
-            border-left: 0 !important;
-            border-right: 0 !important;
-            border-bottom: 1px solid #e8eef6;
-            font-weight: 700;
-            vertical-align: middle;
-        }
-
-        .rank-table tr:hover td {
-            background: #f7fbff;
-        }
-
-        .rank-num {
-            display: inline-flex;
-            width: 20px;
-            height: 20px;
-            border-radius: 5px;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 11px;
-            font-weight: 950;
-        }
-
-        .badge {
-            display: inline-flex;
-            min-width: 58px;
-            height: 24px;
-            padding: 0 10px;
-            align-items: center;
-            justify-content: center;
-            border-radius: 7px;
-            font-weight: 950;
-            font-size: 12px;
-        }
-
-        .badge.baixo { background: var(--green); color: white; }
-        .badge.medio { background: var(--yellow); color: #4a3800; }
-        .badge.alto { background: var(--orange); color: white; }
-        .badge.critico { background: var(--red); color: white; }
-
-        .legend-box {
-            background: rgba(255, 255, 255, .96);
-            border: 1px solid #dfe9f5;
-            border-radius: 12px;
-            padding: 12px 14px;
-            display: inline-block;
-            font-size: 12px;
-            color: var(--text);
-            margin-top: -2px;
-            box-shadow: 0 6px 16px rgba(17, 42, 70, 0.06);
-        }
-
-        .legend-row { display: flex; align-items: center; gap: 8px; margin: 5px 0; font-weight: 700; }
-        .dot { width: 13px; height: 13px; border-radius: 50%; display: inline-block; }
-
-        .updates-row {
-            display: flex;
-            gap: 12px;
-            align-items: flex-start;
-            padding: 13px 0;
-            border-bottom: 1px solid #e6edf6;
-            color: var(--text);
-        }
-
-        .updates-row:last-child { border-bottom: none; }
-        .updates-icon {
-            width: 36px;
-            height: 36px;
-            border-radius: 12px;
-            background: #eef6ff;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 19px;
-            flex: 0 0 auto;
-        }
-
-        .muted { color: var(--muted); font-size: 12px; font-weight: 650; }
-
-        .info-list-row {
-            display: grid;
-            grid-template-columns: 30px 1fr 1fr;
-            align-items: center;
-            gap: 8px;
-            padding: 10px 0;
-            border-bottom: 1px solid #edf2f7;
-            color: var(--text);
-            font-size: 13px;
-            font-weight: 750;
-        }
-
-        .info-list-row span:nth-child(2) { color: #53687f; }
-        .risk-bar {
-            height: 13px;
-            width: 100%;
-            border-radius: 999px;
-            background: linear-gradient(90deg, #27c76a 0 25%, #a9d545 25% 50%, #ff8a1d 50% 75%, #f1283c 75% 100%);
-            position: relative;
-            margin: 22px 0 6px 0;
-            overflow: visible;
-        }
-        .risk-marker {
-            position: absolute;
-            top: 18px;
-            left: 37%;
-            width: 0; height: 0;
-            border-left: 8px solid transparent;
-            border-right: 8px solid transparent;
-            border-bottom: 10px solid #0b1f34;
-        }
-        .risk-labels {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            font-size: 12px;
-            color: #435b74;
-            text-align: center;
-            font-weight: 750;
-            margin-top: 16px;
-        }
-
-        .chips { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
-        .chip {
-            border: 1px solid #bfd4ec;
-            background: #f8fbff;
-            color: #0b68d8;
-            border-radius: 999px;
-            padding: 6px 12px;
-            font-size: 12px;
-            font-weight: 850;
-        }
-
-        .mini-card {
-            background: #fff;
-            border: 1px solid var(--border);
-            border-radius: 14px;
-            padding: 14px;
-        }
-
-        .callout-yellow {
-            background: #fff9e5;
-            border: 1px solid #f4ce3a;
-            border-radius: 12px;
-            padding: 14px;
-            color: #4d3c04;
-            font-weight: 700;
-        }
-
-        .footer-note {
-            color: #6e8093;
-            font-size: 11px;
-            margin-top: 10px;
-            font-weight: 650;
-        }
-
-        @media (max-width: 1200px) {
-            .topbar { align-items: flex-start; flex-direction: column; }
-            .topbar-title { white-space: normal; }
-        }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-### dados API
+API_URL = os.getenv("API_URL", "http://127.0.0.1:8000").rstrip("/")
+GEOJSON_PATH = Path(__file__).resolve().parent / "assets" / "limites_bairros_recife_2023.geojson"
+RISK_ORDER = ["Baixo", "Médio", "Alto", "Crítico"]
 RISK_COLORS = {
     "Baixo": "#20c665",
     "Médio": "#ffd448",
     "Alto": "#ff8618",
     "Crítico": "#f1283c",
 }
-
-RISK_ORDER = ["Baixo", "Médio", "Alto", "Crítico"]
-
-
-@st.cache_data(ttl=3600)
-def fetch_bairros_data():
-    expected_columns = [
-        "Bairro", "UF", "Cidade", "Semana", "População", "Chuva lag4", "Temp. max lag4",
-        "Casos previstos", "Casos históricos", "Incidência por 100 mil", "Nível de alerta", "lat", "lon"
-    ]
-    url = "https://epidemiological-forecaster.onrender.com/predict/recife?ano=2025&semana=1"
-
-    try:
-        response = requests.get(url, timeout=30)
-        if response.status_code != 200:
-            return pd.DataFrame(columns=expected_columns)
-
-        payload = response.json()
-        if isinstance(payload, dict):
-            payload = payload.get("data", payload.get("results", []))
-        if not isinstance(payload, list):
-            payload = []
-
-        if not payload:
-            return pd.DataFrame(columns=expected_columns)
-
-        df = pd.DataFrame(payload)
-        rename_map = {
-            "bairro_norm": "Bairro",
-            "casos_previstos": "Casos previstos",
-            "incidencia_100k": "Incidência por 100 mil",
-            "nivel_alerta": "Nível de alerta",
-        }
-        df = df.rename(columns=rename_map)
-
-        if "Bairro" in df.columns:
-            df["Bairro"] = df["Bairro"].fillna("").astype(str).str.title()
-
-        for col, default in {
-            "UF": "PE",
-            "Cidade": "Recife",
-            "Semana": "2025-01",
-            "Chuva lag4": 0.0,
-            "Temp. max lag4": 0.0,
-            "População": 0,
-            "Casos previstos": 0,
-            "Casos históricos": 0,
-            "Incidência por 100 mil": 0.0,
-            "Nível de alerta": "Baixo",
-        }.items():
-            if col not in df.columns:
-                df[col] = default
-
-        if "lat" not in df.columns:
-            df["lat"] = -8.0500 + (df.index % 6) * 0.005
-        if "lon" not in df.columns:
-            df["lon"] = -34.9000 + (df.index % 6) * 0.006
-
-        df["UF"] = df["UF"].fillna("PE").astype(str).str.upper()
-        df["Cidade"] = df["Cidade"].fillna("Recife").astype(str).str.title()
-        df["Semana"] = df["Semana"].fillna("2025-01").astype(str)
-        df["Chuva lag4"] = pd.to_numeric(df["Chuva lag4"], errors="coerce").fillna(0.0)
-        df["Temp. max lag4"] = pd.to_numeric(df["Temp. max lag4"], errors="coerce").fillna(0.0)
-        df["Casos previstos"] = pd.to_numeric(df["Casos previstos"], errors="coerce").fillna(0)
-        df["Casos históricos"] = pd.to_numeric(df["Casos históricos"], errors="coerce").fillna(0)
-        df["Incidência por 100 mil"] = pd.to_numeric(df["Incidência por 100 mil"], errors="coerce").fillna(0.0)
-        df["lat"] = pd.to_numeric(df["lat"], errors="coerce").fillna(-8.0500)
-        df["lon"] = pd.to_numeric(df["lon"], errors="coerce").fillna(-34.9000)
-
-        return df.reindex(columns=expected_columns)
-
-    except Exception:
-        return pd.DataFrame(columns=expected_columns)
-
-serie_casos = pd.DataFrame(
-    {
-        "Semana": ["SE 46", "SE 47", "SE 48", "SE 49", "SE 50", "SE 51", "SE 52", "SE 01"],
-        "Casos previstos": [820, 910, 1020, 1110, 1230, 1150, 1210, 1382],
-    }
-)
-
-serie_clima = pd.DataFrame(
-    {
-        "Semana": ["SE 46", "SE 47", "SE 48", "SE 49", "SE 50", "SE 51", "SE 52", "SE 01"],
-        "Chuva (mm)": [45, 62, 80, 55, 70, 65, 50, 40],
-        "Temperatura (°C)": [28.1, 28.6, 29.8, 30.1, 30.5, 29.7, 28.9, 28.2],
-    }
-)
-
-serie_bairro = pd.DataFrame(
-    {
-        "Semana": ["SE 50", "SE 51", "SE 52", "SE 01", "SE 02", "SE 03", "SE 04", "SE 05"],
-        "Casos previstos": [10, 11, 13, 14, 16, 18, 20, 22],
-        "Casos históricos": [8, 9, 11, 12, 10, 9, 11, 13],
-    }
-)
-
-hospitais = pd.DataFrame(
-    [
-        ["Hospital das Clínicas", "SP", 93.2, 107.4, 1842, "Crítico", -23.5570, -46.6680],
-        ["Hospital Municipal Souza Aguiar", "RJ", 91.1, 104.6, 1726, "Crítico", -22.9068, -43.1729],
-        ["Santa Casa de Belo Horizonte", "MG", 88.7, 101.2, 1512, "Alto", -19.9191, -43.9386],
-        ["Hospital Geral de Fortaleza", "CE", 86.5, 98.3, 1298, "Alto", -3.7450, -38.5230],
-        ["Hospital da Restauração", "PE", 82.4, 94.1, 1074, "Alto", -8.0500, -34.9000],
-        ["Hospital São Lucas da PUCRS", "RS", 78.6, 90.5, 934, "Médio", -30.0600, -51.1750],
-        ["Hospital Universitário da UFPR", "PR", 76.1, 87.3, 812, "Médio", -25.4284, -49.2733],
-        ["Hospital de Base de Brasília", "DF", 74.2, 84.7, 732, "Médio", -15.7939, -47.8828],
+RISK_ACTIONS = {
+    "Baixo": [
+        "Manter o monitoramento epidemiológico de rotina.",
+        "Preservar as ações regulares de eliminação de criadouros.",
     ],
-    columns=["Hospital / Região", "UF", "Ocupação atual", "Ocupação prevista", "Pacientes estimados", "Nível de risco", "lat", "lon"],
-)
+    "Médio": [
+        "Reforçar a vigilância de novos casos e sintomas.",
+        "Ampliar a comunicação preventiva com a população.",
+        "Priorizar inspeções em locais com recorrência de focos.",
+    ],
+    "Alto": [
+        "Intensificar inspeções domiciliares e controle vetorial.",
+        "Mobilizar equipes de vigilância para resposta antecipada.",
+        "Acompanhar diariamente a evolução das notificações.",
+    ],
+    "Crítico": [
+        "Acionar resposta epidemiológica prioritária.",
+        "Concentrar ações de controle vetorial no bairro.",
+        "Reforçar comunicação de risco e capacidade assistencial.",
+        "Reavaliar o cenário assim que novos dados forem recebidos.",
+    ],
+}
 
-ocupacao_semanal = pd.DataFrame(
-    {
-        "Semana": ["SE 46", "SE 47", "SE 48", "SE 49", "SE 50", "SE 51", "SE 52"],
-        "Ocupação atual": [71, 74, 76, 78, 81, 83, 85],
-        "Ocupação prevista": [76, 80, 84, 87, 90, 92, 94],
+
+st.markdown(
+    """
+    <style>
+    :root { --navy:#06243d; --blue:#1683ff; --border:#dfe8f2; --muted:#64748b; }
+    .stApp { background:#f5f8fc; color:#092b4c; }
+    .block-container { padding-top:1rem; padding-bottom:2rem; max-width:1500px; }
+    [data-testid="stSidebar"] { background:linear-gradient(180deg,#082f50,#031a2d); }
+    [data-testid="stSidebar"] * { color:white; }
+    .brand { text-align:center; padding:12px 0 22px; }
+    .brand-icon { font-size:54px; }
+    .brand-title { font-size:30px; font-weight:900; letter-spacing:.04em; }
+    .brand-sub { font-size:13px; opacity:.85; }
+    .hero { background:white; border:1px solid var(--border); border-radius:16px; padding:18px 22px;
+            box-shadow:0 8px 24px rgba(25,52,82,.06); margin-bottom:14px; }
+    .hero h1 { margin:0; font-size:28px; color:#092b4c; }
+    .hero p { margin:6px 0 0; color:var(--muted); }
+    div[data-testid="stMetric"] { background:white; border:1px solid var(--border); border-radius:16px;
+            padding:16px 18px; box-shadow:0 7px 20px rgba(25,52,82,.06); min-height:118px; }
+    [data-testid="stMetricLabel"], [data-testid="stMetricLabel"] * {
+        font-weight:800 !important; color:#23415f !important;
     }
-)
-
-demanda_regiao = pd.DataFrame(
-    {
-        "Região": ["Sudeste", "Nordeste", "Sul", "Centro-Oeste", "Norte"],
-        "Pacientes estimados": [9842, 5124, 2648, 812, 306],
+    div[data-testid="stMetricValue"], div[data-testid="stMetricValue"] * { color:#092b4c !important; }
+    div[data-testid="stVerticalBlockBorderWrapper"] { background:white; border-color:var(--border);
+            border-radius:16px; box-shadow:0 7px 20px rgba(25,52,82,.05); }
+    .risk-card { border-radius:14px; color:white; padding:16px; min-height:135px;
+            box-shadow:0 8px 18px rgba(15,36,60,.10); }
+    .risk-card .horizon { font-size:13px; font-weight:800; opacity:.9; }
+    .risk-card .level { font-size:24px; font-weight:950; margin:8px 0 3px; }
+    .risk-card .confidence { font-size:14px; font-weight:750; }
+    .risk-card .target { font-size:12px; opacity:.9; margin-top:8px; }
+    .definition-table { width:100%; border-collapse:collapse; font-size:14px; }
+    .definition-table th,.definition-table td { padding:10px; border-bottom:1px solid #e6edf5; text-align:left; }
+    .definition-table th { color:#23415f; background:#f7faff; }
+    .notice { background:#eef6ff; border:1px solid #cfe4ff; border-radius:12px; padding:12px 14px;
+              color:#21476c; font-size:13px; }
+    .update-row { padding:9px 0; border-bottom:1px solid #e6edf5; }
+    .update-row:last-child { border:0; }
+    .update-label { color:var(--muted); font-size:12px; }
+    .update-value { color:#092b4c; font-weight:800; }
+    .action-list li { margin:8px 0; color:#23415f; }
+    div[data-testid="stDownloadButton"] button {
+        background:#0b6ffb !important; color:#ffffff !important; border:1px solid #0b6ffb !important;
+        font-weight:800 !important;
     }
+    div[data-testid="stDownloadButton"] button * { color:#ffffff !important; }
+    div[data-testid="stDownloadButton"] button:hover {
+        background:#075dcc !important; border-color:#075dcc !important; color:#ffffff !important;
+    }
+    h2,h3 { color:#092b4c !important; }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
-### FUNÇÕES VISUAIS
-def br_int(value):
-    return f"{int(value):,}".replace(",", ".")
+
+def br_int(value: float | int) -> str:
+    return f"{int(round(float(value))):,}".replace(",", ".")
 
 
-def br_float(value, decimals=1):
-    return f"{float(value):.{decimals}f}".replace(".", ",")
+def br_float(value: float | int, decimals: int = 1) -> str:
+    return f"{float(value):,.{decimals}f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
-def risk_class(value):
-    return value.lower().replace("í", "i").replace("é", "e")
+def pct(value: float) -> str:
+    return f"{float(value) * 100:.1f}%".replace(".", ",")
 
 
-def badge(value):
-    return f'<span class="badge {risk_class(value)}">{value}</span>'
+@st.cache_data(show_spinner=False)
+def load_neighborhood_geojson() -> dict:
+    """Carrega os limites de 2023 e padroniza a chave usada pelo modelo."""
+    with GEOJSON_PATH.open("r", encoding="utf-8-sig") as source:
+        geojson = json.load(source)
+    name_aliases = {"SITIO DOS PINTOS": "SITIO DOS PINTOS SAO BRAS"}
+    for feature in geojson["features"]:
+        properties = feature.setdefault("properties", {})
+        source_name = str(properties.get("EBAIRRNOME", "")).strip().upper()
+        properties["bairro_norm"] = name_aliases.get(source_name, source_name)
+    return geojson
 
 
-def rank_num(i, level):
-    color = RISK_COLORS.get(level, "#9aacc0")
-    return f'<span class="rank-num" style="background:{color}">{i}</span>'
+@st.cache_data(ttl=300, show_spinner=False)
+def api_get(path: str, params: dict | None = None) -> dict:
+    # O plano gratuito do Render pode precisar de cerca de um minuto para
+    # reativar a API após um período sem acessos.
+    response = requests.get(f"{API_URL}{path}", params=params, timeout=90)
+    response.raise_for_status()
+    return response.json()
 
 
-def sidebar_logo():
-    st.sidebar.markdown(
-        """
-        <div style="text-align:center; padding: 12px 0 26px 0;">
-            <div style="width:92px;height:92px;border-radius:30px;margin:0 auto 8px auto;
-                        border:3px solid #1683ff; display:flex; align-items:center; justify-content:center;
-                        background:rgba(22,131,255,.10); box-shadow:0 12px 32px rgba(22,131,255,.20);">
-                <span style="font-size:44px;">🦟</span>
-            </div>
-            <div style="font-size:34px; font-weight:950; letter-spacing:.5px;">SIPD</div>
-            <div style="font-size:14px; font-weight:650; line-height:1.35; opacity:.95;">
-                Sistema Inteligente de<br>Predição de Dengue
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+def load_or_stop(path: str, params: dict | None = None) -> dict:
+    try:
+        return api_get(path, params)
+    except requests.RequestException as exc:
+        st.error(
+            "Não foi possível consultar a API do Epidemiological Forecaster. Se este for o primeiro "
+            "acesso após um período sem uso, aguarde um minuto e recarregue a página. Confira também "
+            "a variável `API_URL` no ambiente do Streamlit."
+        )
+        st.caption(str(exc))
+        st.stop()
+
+
+def panel(title: str):
+    container = st.container(border=True)
+    container.markdown(f"### {title}")
+    return container
+
+
+def probability_frame(row: pd.Series) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "Categoria": RISK_ORDER,
+            "Probabilidade": [row["prob_baixo"], row["prob_medio"], row["prob_alto"], row["prob_critico"]],
+        }
     )
 
 
-def topbar(kind="alerta"):
-    if kind == "risco":
-        extra = (
-            '<div class="fake-select"><div><span>Região</span>Todas</div><div>⌄</div></div>'
-            '<div class="fake-select"><div><span>UF</span>Todos</div><div>⌄</div></div>'
-            '<div class="fake-select"><div><span>Nível de risco</span>Todos</div><div>⌄</div></div>'
-        )
-    else:
-        extra = (
-            '<div class="fake-select"><div><span>UF</span>Todas</div><div>⌄</div></div>'
-            '<div class="fake-select"><div><span>Cidade</span>Todas</div><div>⌄</div></div>'
-            '<div class="fake-select"><div><span>Nível de alerta</span>Todos</div><div>⌄</div></div>'
-        )
-
-    html = f'''
-<div class="topbar">
-    <div class="topbar-title">Sistema Inteligente de Predição de Dengue</div>
-    <div class="topbar-controls">
-        <div class="fake-select large">
-            <div>📅&nbsp;&nbsp;Semana epidemiológica: 2025-01</div>
-            <div>⌄</div>
-        </div>
-        {extra}
-        <div class="bell">🔔<span class="bell-badge">3</span></div>
-    </div>
-</div>
-'''
-
-    st.markdown(html, unsafe_allow_html=True)
+def probability_chart(row: pd.Series) -> go.Figure:
+    frame = probability_frame(row)
+    figure = px.bar(
+        frame,
+        x="Categoria",
+        y="Probabilidade",
+        color="Categoria",
+        color_discrete_map=RISK_COLORS,
+        text=frame["Probabilidade"].map(pct),
+        category_orders={"Categoria": RISK_ORDER},
+    )
+    figure.update_traces(textposition="outside", hovertemplate="%{x}: %{y:.1%}<extra></extra>")
+    figure.update_yaxes(range=[0, 1.08], tickformat=".0%", title=None)
+    figure.update_xaxes(title=None)
+    figure.update_layout(showlegend=False, margin=dict(l=10, r=10, t=20, b=10), height=385)
+    return figure
 
 
-def page_title(title, breadcrumb=None, action=None):
-    crumb_html = f'<span class="breadcrumb">{breadcrumb}</span>' if breadcrumb else ""
-    action_html = f'<div class="btn-outline">{action}</div>' if action else ""
-    st.markdown(
-        f"""
-        <div class="page-title-row">
-            <div><span class="page-title">{title}</span>{crumb_html}</div>
-            <div>{action_html}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+def threshold_table() -> str:
+    rows = [
+        ("Baixo", "Menor que 100 por 100 mil habitantes"),
+        ("Médio", "De 100 até menos de 300 por 100 mil"),
+        ("Alto", "De 300 até menos de 500 por 100 mil"),
+        ("Crítico", "Igual ou superior a 500 por 100 mil"),
+    ]
+    body = "".join(
+        f'<tr><td><span style="color:{RISK_COLORS[level]};font-weight:900">● {level}</span></td><td>{definition}</td></tr>'
+        for level, definition in rows
+    )
+    return (
+        '<table class="definition-table"><thead><tr><th>Nível</th>'
+        '<th>Incidência acumulada em 4 semanas</th></tr></thead>'
+        f"<tbody>{body}</tbody></table>"
     )
 
 
-def kpi(title, value, sub, icon="📊", accent="#1683ff", trend=None, trend_class="trend-up"):
-    trend_html = f'<span class="{trend_class}">{trend}</span>' if trend else ""
-    html = f"""
-        <div class="kpi-card" style="--accent:{accent};">
-            <div class="kpi-icon">{icon}</div>
-            <div>
-                <div class="kpi-title">{title}</div>
-                <div class="kpi-value">{value}</div>
-                <div class="kpi-sub">{trend_html} {sub}</div>
-            </div>
-        </div>
-    """
-    st.markdown(html, unsafe_allow_html=True)
-
-
-def section(title, info=True, height=None, key=None, css_class=""):
-    """Cria um card Streamlit com altura previsível.
-
-    Quando ``height`` não for informado, o parâmetro não é enviado ao
-    ``st.container``. Isso evita o erro ``StreamlitInvalidHeightError`` em
-    versões que não aceitam ``None`` explicitamente.
-    """
-    icon = " ⓘ" if info else ""
-    marker_classes = "sipd-section-marker"
-    if css_class:
-        marker_classes += f" {css_class}"
-
-    @contextmanager
-    def _section_context():
-        container_args = {"border": True}
-
-        if height is not None:
-            container_args["height"] = height
-
-        if key is not None:
-            container_args["key"] = key
-
-        with st.container(**container_args):
+def horizon_cards(forecasts: pd.DataFrame, scope: str) -> None:
+    columns = st.columns(4)
+    for column, (_, row) in zip(columns, forecasts.sort_values("horizonte_semanas").iterrows()):
+        horizon = int(row["horizonte_semanas"])
+        with column:
+            if scope == "bairro":
+                level = row["categoria_prevista"]
+                color = RISK_COLORS[level]
+                main = level
+                detail = f"Confiança: {pct(row['confianca_modelo'])}"
+            else:
+                color = "#1683ff"
+                main = f"{int(row['bairros_alto_critico'])} bairros"
+                detail = f"{int(row['bairros_criticos'])} críticos · confiança média {pct(row['confianca_modelo'])}"
             st.markdown(
-                f'<span class="{marker_classes}"></span>'
-                f'<div class="panel-title">{title}{icon}</div>',
+                f"""
+                <div class="risk-card" style="background:{color}">
+                  <div class="horizon">S+{horizon}</div>
+                  <div class="level">{main}</div>
+                  <div class="confidence">{detail}</div>
+                  <div class="target">Semana-alvo: {row['semana_alvo']}</div>
+                </div>
+                """,
                 unsafe_allow_html=True,
             )
-            yield
-
-    return _section_context()
 
 
-def legend_box():
+with st.sidebar:
     st.markdown(
-        """
-        <div class="legend-box">
-            <b>Nível de criticidade</b>
-            <div class="legend-row"><span class="dot" style="background:#20c665"></span>Baixo</div>
-            <div class="legend-row"><span class="dot" style="background:#ffd448"></span>Médio</div>
-            <div class="legend-row"><span class="dot" style="background:#ff8618"></span>Alto</div>
-            <div class="legend-row"><span class="dot" style="background:#f1283c"></span>Crítico</div>
-        </div>
-        """,
+        '<div class="brand"><div class="brand-icon">🦟</div>'
+        '<div class="brand-title">Epidemiological<br>Forecaster</div></div>',
         unsafe_allow_html=True,
     )
+    page = st.radio("Navegação", ["Dashboard", "Bairros"], label_visibility="collapsed")
+    st.markdown("---")
+    st.caption("XGBoost · Criticidade v2")
+    st.caption("Produção operacional + validação")
 
 
-def apply_chart_layout(fig, height=335, showlegend=True):
-    fig.update_layout(
-        height=height,
-        template="plotly_white",
-        margin=dict(l=12, r=12, t=8, b=20),
-        paper_bgcolor="#ffffff",
-        plot_bgcolor="#ffffff",
-        font=dict(family="Inter, Segoe UI, Arial", color="#092b4c", size=12),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5) if showlegend else None,
-    )
-    fig.update_xaxes(showgrid=False, linecolor="#dfe9f5")
-    fig.update_yaxes(gridcolor="#e8eef6", linecolor="#dfe9f5")
-    return fig
+options = load_or_stop("/api/options")
+origin_labels = [item["label"] for item in options["origens"]]
 
-
-def brazil_map(df, level_col, hover_name, size_col, title="", show_legend=True):
-    """Mapa retangular focado no Brasil, com calor, marcadores e legenda sobreposta."""
-    fig = go.Figure()
-
-    risk_weight = {"Baixo": 1, "Médio": 2, "Alto": 3, "Crítico": 4}
-    map_df = df.copy()
-    max_size = max(float(map_df[size_col].max()), 1.0)
-    map_df["heat_weight"] = (
-        map_df[level_col].map(risk_weight).fillna(1)
-        * map_df[size_col].astype(float)
-    )
-
-    fig.add_trace(
-        go.Scattermap(
-            lat=map_df["lat"],
-            lon=map_df["lon"],
-            mode="markers",
-            marker=dict(
-                size=18,
-                color=map_df["heat_weight"],
-                colorscale=[
-                    [0.00, "rgba(32,198,101,0.06)"],
-                    [0.22, "#20c665"],
-                    [0.48, "#ffd448"],
-                    [0.72, "#ff8618"],
-                    [1.00, "#f1283c"],
-                ],
-                cmin=0,
-                cmax=max_size * max(risk_weight.values()),
-                opacity=0.55,
-                showscale=False,
-            ),
-            hoverinfo="skip",
-        )
-    )
-
-    for level in RISK_ORDER:
-        temp = map_df[map_df[level_col] == level]
-        if temp.empty:
-            continue
-
-        sizes = (temp[size_col].astype(float) / max_size) * 25 + 11
-        customdata = temp[[size_col, level_col]].to_numpy()
-
-        fig.add_trace(
-            go.Scattermap(
-                lat=temp["lat"],
-                lon=temp["lon"],
-                mode="markers",
-                marker=dict(
-                    size=sizes,
-                    color=RISK_COLORS[level],
-                    opacity=0.88,
-                ),
-                name=level,
-                text=temp[hover_name],
-                customdata=customdata,
-                hovertemplate=(
-                    "<b>%{text}</b><br>"
-                    "Valor: %{customdata[0]}<br>"
-                    "Nível: %{customdata[1]}"
-                    "<extra></extra>"
-                ),
-            )
-        )
-
-    fig.update_layout(
-        title=title,
-        height=405,
-        margin=dict(l=0, r=0, t=0, b=0),
-        paper_bgcolor="#ffffff",
-        plot_bgcolor="#ffffff",
-        showlegend=False,
-        map=dict(
-            style="carto-positron",
-            center=dict(lat=-14.3, lon=-52.0),
-            zoom=3.05,
-        ),
-        font=dict(family="Inter, Segoe UI, Arial", color="#092b4c", size=12),
-        hoverlabel=dict(bgcolor="#092b4c", font_color="white"),
-        uirevision="sipd-brazil-map",
-    )
-
-    if show_legend:
-        # Caixa branca sobreposta no canto inferior esquerdo do mapa.
-        fig.add_shape(
-            type="rect",
-            xref="paper",
-            yref="paper",
-            x0=0.018,
-            x1=0.215,
-            y0=0.035,
-            y1=0.350,
-            fillcolor="rgba(255,255,255,0.96)",
-            line=dict(color="#dfe9f5", width=1),
-            layer="above",
-        )
-        fig.add_annotation(
-            xref="paper", yref="paper", x=0.040, y=0.318,
-            text="<b>Nível de criticidade</b>",
-            showarrow=False, xanchor="left", yanchor="middle",
-            font=dict(size=12, color="#092b4c"),
-        )
-
-        legend_items = [
-            ("Baixo", "#20c665", 0.257),
-            ("Médio", "#ffd448", 0.198),
-            ("Alto", "#ff8618", 0.139),
-            ("Crítico", "#f1283c", 0.080),
-        ]
-        for label, color, y in legend_items:
-            fig.add_shape(
-                type="circle",
-                xref="paper", yref="paper",
-                x0=0.040, x1=0.057,
-                y0=y - 0.012, y1=y + 0.012,
-                fillcolor=color,
-                line=dict(color=color, width=1),
-                layer="above",
-            )
-            fig.add_annotation(
-                xref="paper", yref="paper", x=0.067, y=y,
-                text=f"<b>{label}</b>",
-                showarrow=False, xanchor="left", yanchor="middle",
-                font=dict(size=11, color="#092b4c"),
-            )
-
-    return fig
-
-
-def small_location_map(row):
-    """Mapa retangular de localização do bairro selecionado."""
-    fig = go.Figure()
-
-    fig.add_trace(
-        go.Scattermap(
-            lat=[row["lat"]],
-            lon=[row["lon"]],
-            mode="markers+text",
-            marker=dict(
-                size=24,
-                color=RISK_COLORS[row["Nível de alerta"]],
-                opacity=0.95,
-            ),
-            text=[row["Bairro"]],
-            textposition="bottom center",
-            hovertemplate=(
-                f"<b>{row['Bairro']}</b><br>"
-                f"{row['Cidade']} - {row['UF']}"
-                "<extra></extra>"
-            ),
-            showlegend=False,
-        )
-    )
-
-    fig.update_layout(
-        height=295,
-        margin=dict(l=0, r=0, t=0, b=0),
-        paper_bgcolor="#ffffff",
-        plot_bgcolor="#ffffff",
-        map=dict(
-            style="carto-positron",
-            center=dict(lat=float(row["lat"]), lon=float(row["lon"])),
-            zoom=11,
-        ),
-        hoverlabel=dict(bgcolor="#092b4c", font_color="white"),
-    )
-
-    return fig
-
-
-def ranking_table_dashboard():
-    ranking = bairros.head(8).copy().reset_index(drop=True)
-    rows = []
-
-    for idx, row in ranking.iterrows():
-        level = row["Nível de alerta"]
-        rows.append(
-            "<tr>"
-            f"<td>{rank_num(idx + 1, level)}</td>"
-            f"<td>{row['Bairro']}</td>"
-            f"<td>{row['UF']} / {row['Cidade']}</td>"
-            f"<td>{row['Casos previstos']}</td>"
-            f"<td>{br_float(row['Incidência por 100 mil'])}</td>"
-            f"<td>{badge(level)}</td>"
-            "</tr>"
-        )
-
-    return (
-        '<div style="overflow-x:auto;">'
-        '<table class="rank-table">'
-        '<thead><tr>'
-        '<th>#</th><th>Bairro</th><th>UF / Cidade</th>'
-        '<th>Casos previstos</th><th>Incidência<br>por 100 mil</th><th>Nível de alerta</th>'
-        '</tr></thead>'
-        f"<tbody>{''.join(rows)}</tbody>"
-        '</table></div>'
-        '<div class="footer-note">'
-        'Incidência calculada com base na população estimada do bairro (IBGE, 2024).'
-        '</div>'
-    )
-
-
-def ranking_table_hospitals():
-    temp = hospitais.copy().sort_values("Ocupação prevista", ascending=False).reset_index(drop=True)
-    rows = []
-
-    for idx, row in temp.iterrows():
-        level = row["Nível de risco"]
-        rows.append(
-            "<tr>"
-            f"<td>{rank_num(idx + 1, level)}</td>"
-            f"<td>{row['Hospital / Região']}</td>"
-            f"<td>{row['UF']}</td>"
-            f"<td>{br_float(row['Ocupação atual'])}%</td>"
-            f"<td>{br_float(row['Ocupação prevista'])}%</td>"
-            f"<td>{br_int(row['Pacientes estimados'])}</td>"
-            f"<td>{badge(level)}</td>"
-            "</tr>"
-        )
-
-    return (
-        '<div style="overflow-x:auto;">'
-        '<table class="rank-table">'
-        '<thead><tr>'
-        '<th>#</th><th>Hospital / Região</th><th>UF</th>'
-        '<th>Ocupação atual</th><th>Ocupação prevista</th>'
-        '<th>Pacientes estimados</th><th>Nível de risco</th>'
-        '</tr></thead>'
-        f"<tbody>{''.join(rows)}</tbody>"
-        '</table></div>'
-        '<div class="footer-note">'
-        'Indicadores calculados com base na taxa de ocupação de leitos e demanda projetada. (IBGE, 2024)'
-        '</div>'
-    )
-
-
-def pressure_diagram_html():
-    """Retorna o diagrama de fatores de pressão em HTML isolado.
-
-    O conteúdo é renderizado por ``components.html`` dentro de um iframe.
-    Dessa forma, o Streamlit não interpreta as tags indentadas como Markdown
-    ou bloco de código, e o desenho ocupa toda a largura disponível.
+st.markdown(
     """
-    return r"""
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="utf-8">
-<style>
-    * {
-        box-sizing: border-box;
-    }
-
-    html, body {
-        width: 100%;
-        height: 100%;
-        margin: 0;
-        padding: 0;
-        overflow: hidden;
-        background: transparent;
-        font-family: Inter, "Segoe UI", Arial, sans-serif;
-        color: #163a5b;
-    }
-
-    .pressure-root {
-        width: 100%;
-        height: 304px;
-        display: flex;
-        flex-direction: column;
-    }
-
-    .pressure-layout {
-        display: grid;
-        grid-template-columns: minmax(135px, 1fr) 125px minmax(175px, 1.2fr) 82px;
-        column-gap: 8px;
-        align-items: start;
-        flex: 1 1 auto;
-        min-height: 0;
-    }
-
-    .column-heading {
-        height: 25px;
-        display: flex;
-        align-items: flex-start;
-        color: #31506e;
-        font-size: 11px;
-        font-weight: 800;
-        white-space: nowrap;
-    }
-
-    .rows {
-        display: grid;
-        grid-template-rows: repeat(5, 43px);
-        row-gap: 1px;
-    }
-
-    .source-item,
-    .hospital-item {
-        display: flex;
-        align-items: flex-start;
-        gap: 7px;
-        min-width: 0;
-        height: 43px;
-    }
-
-    .source-icon {
-        width: 20px;
-        height: 20px;
-        min-width: 20px;
-        margin-top: 1px;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: #fff;
-        font-size: 10px;
-        line-height: 1;
-        font-weight: 900;
-    }
-
-    .source-icon.critical {
-        background: #f1283c;
-    }
-
-    .source-icon.high {
-        background: #ff8618;
-    }
-
-    .hospital-icon {
-        width: 20px;
-        min-width: 20px;
-        margin-top: 1px;
-        color: #f1283c;
-        font-size: 18px;
-        line-height: 1;
-        font-weight: 900;
-        text-align: center;
-    }
-
-    .hospital-icon.high {
-        color: #ff8618;
-    }
-
-    .item-copy {
-        min-width: 0;
-        line-height: 1.12;
-    }
-
-    .item-name {
-        display: block;
-        color: #193b5c;
-        font-size: 10px;
-        font-weight: 750;
-        margin-bottom: 2px;
-        overflow-wrap: anywhere;
-    }
-
-    .item-meta {
-        display: block;
-        color: #6f8296;
-        font-size: 8.5px;
-        font-weight: 700;
-    }
-
-    .item-meta.critical {
-        color: #f1283c;
-    }
-
-    .item-meta.high {
-        color: #ff8618;
-    }
-
-    .connection-column {
-        height: 240px;
-        padding-top: 24px;
-    }
-
-    .connection-svg {
-        display: block;
-        width: 100%;
-        height: 215px;
-        overflow: visible;
-    }
-
-    .impact-card {
-        height: 240px;
-        border: 1px solid #dfe9f5;
-        border-radius: 10px;
-        background: #ffffff;
-        box-shadow: 0 3px 12px rgba(17, 42, 70, 0.05);
-        padding: 8px 7px;
-    }
-
-    .impact-heading {
-        height: 25px;
-        color: #536c84;
-        font-size: 8.5px;
-        font-weight: 850;
-        text-align: center;
-        white-space: nowrap;
-    }
-
-    .impact-rows {
-        display: grid;
-        grid-template-rows: repeat(5, 41px);
-        align-items: center;
-    }
-
-    .impact-value {
-        text-align: center;
-        font-size: 15px;
-        font-weight: 900;
-    }
-
-    .impact-value.critical {
-        color: #f1283c;
-    }
-
-    .impact-value.high {
-        color: #ff8618;
-    }
-
-    .impact-value.medium {
-        color: #e0a900;
-    }
-
-    .pressure-footer {
-        flex: 0 0 auto;
-        margin-top: 5px;
-        color: #75879a;
-        font-size: 8.5px;
-        font-weight: 650;
-        line-height: 1.2;
-    }
-
-    @media (max-width: 620px) {
-        .pressure-layout {
-            grid-template-columns: minmax(120px, 1fr) 92px minmax(150px, 1.05fr) 70px;
-            column-gap: 5px;
-        }
-
-        .column-heading {
-            font-size: 10px;
-        }
-
-        .item-name {
-            font-size: 9px;
-        }
-
-        .connection-column {
-            padding-top: 22px;
-        }
-    }
-</style>
-</head>
-<body>
-<div class="pressure-root">
-    <div class="pressure-layout">
-        <div>
-            <div class="column-heading">Bairros com maior risco</div>
-            <div class="rows">
-                <div class="source-item">
-                    <div class="source-icon critical">⌂</div>
-                    <div class="item-copy">
-                        <span class="item-name">Complexo do Alemão (RJ)</span>
-                        <span class="item-meta critical">Risco: Crítico</span>
-                    </div>
-                </div>
-                <div class="source-item">
-                    <div class="source-icon critical">⌂</div>
-                    <div class="item-copy">
-                        <span class="item-name">Pavuna (RJ)</span>
-                        <span class="item-meta critical">Risco: Crítico</span>
-                    </div>
-                </div>
-                <div class="source-item">
-                    <div class="source-icon high">⌂</div>
-                    <div class="item-copy">
-                        <span class="item-name">Cidade Tiradentes (SP)</span>
-                        <span class="item-meta high">Risco: Alto</span>
-                    </div>
-                </div>
-                <div class="source-item">
-                    <div class="source-icon high">⌂</div>
-                    <div class="item-copy">
-                        <span class="item-name">Jardim Ângela (SP)</span>
-                        <span class="item-meta high">Risco: Alto</span>
-                    </div>
-                </div>
-                <div class="source-item">
-                    <div class="source-icon high">⌂</div>
-                    <div class="item-copy">
-                        <span class="item-name">Coelho Neto (RJ)</span>
-                        <span class="item-meta high">Risco: Alto</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="connection-column" aria-hidden="true">
-            <svg class="connection-svg" viewBox="0 0 125 215" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
-                <!-- Linhas dos bairros críticos -->
-                <path d="M1 10 C38 10, 77 10, 123 10" fill="none" stroke="#f1283c" stroke-width="1.8"/>
-                <path d="M1 10 C38 10, 77 52, 123 52" fill="none" stroke="#f1283c" stroke-width="1.8"/>
-                <path d="M1 52 C38 52, 77 10, 123 10" fill="none" stroke="#f1283c" stroke-width="1.8"/>
-                <path d="M1 52 C38 52, 77 52, 123 52" fill="none" stroke="#f1283c" stroke-width="1.8"/>
-
-                <!-- Linhas dos bairros em nível alto -->
-                <path d="M1 94 C38 94, 77 94, 123 94" fill="none" stroke="#ff8618" stroke-width="1.8"/>
-                <path d="M1 94 C38 94, 77 136, 123 136" fill="none" stroke="#ff8618" stroke-width="1.8"/>
-                <path d="M1 136 C38 136, 77 94, 123 94" fill="none" stroke="#ff8618" stroke-width="1.8"/>
-                <path d="M1 136 C38 136, 77 136, 123 136" fill="none" stroke="#ff8618" stroke-width="1.8"/>
-                <path d="M1 178 C38 178, 77 52, 123 52" fill="none" stroke="#e0a900" stroke-width="1.8"/>
-                <path d="M1 178 C38 178, 77 178, 123 178" fill="none" stroke="#e0a900" stroke-width="1.8"/>
-
-                <circle cx="123" cy="10" r="2.6" fill="#ffffff" stroke="#f1283c" stroke-width="1.8"/>
-                <circle cx="123" cy="52" r="2.6" fill="#ffffff" stroke="#f1283c" stroke-width="1.8"/>
-                <circle cx="123" cy="94" r="2.6" fill="#ffffff" stroke="#ff8618" stroke-width="1.8"/>
-                <circle cx="123" cy="136" r="2.6" fill="#ffffff" stroke="#ff8618" stroke-width="1.8"/>
-                <circle cx="123" cy="178" r="2.6" fill="#ffffff" stroke="#e0a900" stroke-width="1.8"/>
-            </svg>
-        </div>
-
-        <div>
-            <div class="column-heading">Hospitais de referência</div>
-            <div class="rows">
-                <div class="hospital-item">
-                    <div class="hospital-icon">▥</div>
-                    <div class="item-copy">
-                        <span class="item-name">Hospital Municipal Souza Aguiar</span>
-                        <span class="item-meta critical">Impacto: Muito alto</span>
-                    </div>
-                </div>
-                <div class="hospital-item">
-                    <div class="hospital-icon">▥</div>
-                    <div class="item-copy">
-                        <span class="item-name">Hospital Federal de Bonsucesso</span>
-                        <span class="item-meta critical">Impacto: Muito alto</span>
-                    </div>
-                </div>
-                <div class="hospital-item">
-                    <div class="hospital-icon high">▥</div>
-                    <div class="item-copy">
-                        <span class="item-name">Hospital das Clínicas</span>
-                        <span class="item-meta high">Impacto: Alto</span>
-                    </div>
-                </div>
-                <div class="hospital-item">
-                    <div class="hospital-icon high">▥</div>
-                    <div class="item-copy">
-                        <span class="item-name">Hospital Geral de Itaquera</span>
-                        <span class="item-meta high">Impacto: Alto</span>
-                    </div>
-                </div>
-                <div class="hospital-item">
-                    <div class="hospital-icon high">▥</div>
-                    <div class="item-copy">
-                        <span class="item-name">UPA Coelho Neto</span>
-                        <span class="item-meta">Impacto: Médio</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="impact-card">
-            <div class="impact-heading">Impacto estimado</div>
-            <div class="impact-rows">
-                <div class="impact-value critical">+38%</div>
-                <div class="impact-value critical">+34%</div>
-                <div class="impact-value high">+29%</div>
-                <div class="impact-value high">+24%</div>
-                <div class="impact-value medium">+18%</div>
-            </div>
-        </div>
+    <div class="hero">
+      <h1>Epidemiological Forecaster</h1>
+      <p>Classificação da criticidade epidemiológica em Recife com horizontes de uma a quatro semanas.</p>
     </div>
-
-    <div class="pressure-footer">
-        Correlação baseada em incidência prevista de dengue e fluxo histórico de atendimentos. (SIPD, 2024)
-    </div>
-</div>
-</body>
-</html>
-"""
-
-
-def details_table_bairro(row):
-    return (
-        '<div style="overflow-x:auto;">'
-        '<table class="rank-table">'
-        '<thead><tr>'
-        '<th>bairro_id</th><th>Nome do bairro</th><th>Semana<br>epidemiológica</th>'
-        '<th>População total</th><th>Chuva acumulada<br>(lag4)</th>'
-        '<th>Temperatura máx.<br>(lag4)</th><th>Casos previstos<br>(SE atual)</th>'
-        '<th>Casos históricos<br>(SE atual)</th><th>Incidência por<br>100 mil</th>'
-        '<th>Nível de alerta</th>'
-        '</tr></thead><tbody><tr>'
-        f"<td>{row['bairro_id']}</td>"
-        f"<td>{row['Bairro']}</td>"
-        f"<td>{row['Semana']}</td>"
-        f"<td>{br_int(row['População'])}</td>"
-        f"<td>{br_float(row['Chuva lag4'])} mm</td>"
-        f"<td>{br_float(row['Temp. max lag4'])} °C</td>"
-        f"<td>{row['Casos previstos']}</td>"
-        f"<td>{row['Casos históricos']}</td>"
-        f"<td>{br_float(row['Incidência por 100 mil'])}</td>"
-        f"<td>{badge(row['Nível de alerta'])}</td>"
-        '</tr></tbody></table></div>'
-    )
-
-sidebar_logo()
-menu = st.sidebar.radio(
-    "Menu",
-    ["▦  Dashboard", "▥  Bairros", "▣  Hospitais", "▤  Relatórios"],
-    label_visibility="collapsed",
+    """,
+    unsafe_allow_html=True,
 )
-page = "Dashboard" if "Dashboard" in menu else "Bairros" if "Bairros" in menu else "Hospitais" if "Hospitais" in menu else "Relatórios"
 
-with st.spinner("Conectando ao modelo preditivo..."):
-    bairros = fetch_bairros_data()
 
-st.sidebar.markdown("<br><br><br><br>", unsafe_allow_html=True)
-st.sidebar.caption("Versão 1.0.0")
-st.sidebar.caption("© 2026 SIPD")
-
-### TELA 1
 if page == "Dashboard":
-    topbar("alerta")
+    filter_week, filter_horizon, filter_level = st.columns([1.4, 1, 1])
+    with filter_week:
+        origin_label = st.selectbox("Semana epidemiológica de origem", origin_labels, index=0)
+    with filter_horizon:
+        horizon = st.selectbox("Horizonte", [1, 2, 3, 4], format_func=lambda value: f"S+{value}")
+    with filter_level:
+        level = st.selectbox("Nível de criticidade", ["Todos", *RISK_ORDER])
+    origin_year, origin_week = [int(value) for value in origin_label.split("-")]
 
+    dashboard = load_or_stop(
+        "/api/dashboard",
+        {
+            "origin_year": origin_year,
+            "origin_week": origin_week,
+            "horizon": horizon,
+            "level": None if level == "Todos" else level,
+        },
+    )
+    detail = load_or_stop("/api/bairro", {"origin_year": origin_year, "origin_week": origin_week})
+    performance = load_or_stop("/api/performance")
+    kpis = dashboard["kpis"]
+
+    st.caption(
+        f"Previsão feita a partir da SE {origin_label} para a SE {dashboard['filtros']['semana_alvo']}."
+    )
     k1, k2, k3, k4, k5 = st.columns(5)
-    with k1:
-        kpi("Bairros monitorados", "1.248", "vs semana anterior", "🏢", "#1683ff", "↑ 8,2%", "trend-good")
-    with k2:
-        kpi("Casos previstos", "1.382", "vs semana anterior", "📈", "#0b72ee", "↑ 15,7%", "trend-up")
-    with k3:
-        kpi("Alerta crítico", "126", "vs semana anterior", "⚠️", "#f1283c", "↑ 22,1%", "trend-up")
-    with k4:
-        kpi("Taxa média de incidência", "45,8", "vs semana anterior", "〽️", "#12bfc9", "↓ 5,3%", "trend-down")
-    with k5:
-        kpi("Risco de superlotação", "68%", "vs semana anterior", "👥", "#8556e8", "↑ 6,4%", "trend-orange")
+    k1.metric("Bairros monitorados", br_int(kpis["bairros_monitorados"]))
+    k2.metric("Bairros altos", br_int(kpis["bairros_altos"]))
+    k3.metric("Bairros críticos", br_int(kpis["bairros_criticos"]))
+    k4.metric("Incidência recente observada", br_float(kpis["incidencia_recente_observada_4s_100k"]), help="Acumulado de 4 semanas por 100 mil habitantes.")
+    k5.metric("Confiança média", pct(kpis["confianca_media"]))
 
-    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
-    col_map, col_rank = st.columns([1.25, 1.0], gap="large")
-
-    with col_map:
-        with section("Mapa de calor — Risco de dengue no Brasil", height=500, key="dashboard_map", css_class="map-section"):
-            fig_map = brazil_map(bairros, "Nível de alerta", "Bairro", "Casos previstos")
-            st.plotly_chart(fig_map, width="stretch", config={"displayModeBar": False})
-
-    with col_rank:
-        with section("Bairros com maior risco", height=500, key="dashboard_ranking", css_class="rank-section"):
-            st.markdown(ranking_table_dashboard(), unsafe_allow_html=True)
-
-    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
-    col_line, col_clima, col_update = st.columns([1.05, 1.20, 0.80], gap="large")
-
-    with col_line:
-        with section("Evolução semanal dos casos previstos", height=370, key="dashboard_weekly", css_class="chart-section"):
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=serie_casos["Semana"], y=serie_casos["Casos previstos"], mode="lines+markers+text", text=serie_casos["Casos previstos"], textposition="top center", line=dict(color="#1683ff", width=3), marker=dict(size=8)))
-            fig = apply_chart_layout(fig, height=290, showlegend=False)
-            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
-
-    with col_clima:
-        with section("Influência climática", height=370, key="dashboard_climate", css_class="chart-section"):
-            fig = go.Figure()
-            fig.add_trace(go.Bar(x=serie_clima["Semana"], y=serie_clima["Chuva (mm)"], name="Chuva (mm)", marker_color="#1683ff", text=serie_clima["Chuva (mm)"], textposition="outside"))
-            fig.add_trace(go.Scatter(x=serie_clima["Semana"], y=serie_clima["Temperatura (°C)"], name="Temperatura (°C)", mode="lines+markers+text", yaxis="y2", line=dict(color="#f1283c", width=2), text=[f"{br_float(v)}°C" for v in serie_clima["Temperatura (°C)"]], textposition="top center"))
-            fig.update_layout(
-                yaxis=dict(title="mm", range=[0, 105]),
-                yaxis2=dict(title="°C", overlaying="y", side="right", range=[20, 36]),
-            )
-            fig = apply_chart_layout(fig, height=290, showlegend=True)
-            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
-
-    with col_update:
-        with section("Últimas atualizações do modelo", height=370, key="dashboard_updates", css_class="updates-section"):
-            st.markdown(
-                """
-                <div class="updates-row"><div class="updates-icon" style="background:#e9fbef;color:#20c665;">✓</div><div><b>Modelo atualizado há 2 horas</b><br><span class="muted">05/01/2025 08:35</span></div></div>
-                <div class="updates-row"><div class="updates-icon" style="background:#eaf3ff;color:#1683ff;">◎</div><div><b>Precisão estimada: 89%</b><br><span class="muted">Baseado nas últimas 4 semanas</span></div></div>
-                <div class="updates-row"><div class="updates-icon" style="background:#f1ecff;color:#8556e8;">▦</div><div><b>Dados processados até: SE 2025-01</b><br><span class="muted">05/01/2025 06:00</span></div></div>
-                <div style="color:#0b72ee;font-weight:900;margin-top:14px;">Ver histórico de atualizações ›</div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-### TELA 2
-elif page == "Bairros":
-    topbar("alerta")
-    page_title("Detalhe do Bairro", "Dashboard  ›  Bairros  ›  Boa Viagem", "⬇ Exportar relatório")
-
-    row = bairros[bairros["Bairro"] == "Boa Viagem"].iloc[0]
-
-    k1, k2, k3, k4, k5 = st.columns(5)
-    with k1:
-        kpi("População total", br_int(row["População"]), "habitantes", "👥", "#1683ff")
-    with k2:
-        kpi("Casos previstos", str(row["Casos previstos"]), "para a SE 2025-01", "📈", "#72aefb")
-    with k3:
-        kpi("Casos históricos", str(row["Casos históricos"]), "na SE 2025-01", "📋", "#8ee6df")
-    with k4:
-        kpi("Incidência por 100 mil", br_float(row["Incidência por 100 mil"]), "por 100 mil hab.", "〽️", "#d6bbff")
-    with k5:
-        kpi("Nível de alerta", "Médio", "Risco moderado", "⚠️", "#ffd448")
-
-    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
-    left, center, right = st.columns([1.20, 1.10, 0.62], gap="large")
-
+    left, right = st.columns([1.25, 1])
     with left:
-        with section("Informações do bairro", height=440, key="bairro_info", css_class="bairro-main-section bairro-info-section"):
-            st.markdown(
-                f"""
-                <div style="display:flex; gap:14px; align-items:center; margin-bottom:8px;">
-                    <div class="kpi-icon" style="--accent:#1683ff; width:50px;height:50px;min-width:50px;font-size:23px;">🏢</div>
-                    <div><div style="font-size:24px;font-weight:950;color:#092b4c;">{row['Bairro']}</div><div class="muted">bairro_id: {row['bairro_id']}</div></div>
-                </div>
-                <div class="info-list-row"><span>📍</span><span>Cidade</span><b>{row['Cidade']} - {row['UF']}</b></div>
-                <div class="info-list-row"><span>🧭</span><span>Região de Saúde</span><b>I - Recife</b></div>
-                <div class="info-list-row"><span>🗓️</span><span>Semana epidemiológica</span><b>{row['Semana']}</b></div>
-                <div class="info-list-row"><span>👥</span><span>População total</span><b>{br_int(row['População'])} habitantes</b></div>
-                <div class="info-list-row"><span>⌁</span><span>Densidade populacional</span><b>6.842 hab/km²</b></div>
-                <div class="info-list-row"><span>▱</span><span>Área</span><b>18,0 km²</b></div>
-                <div style="height:14px"></div>
-                <b style="color:#092b4c;">Nível de criticidade</b>
-                <div class="risk-bar"><div class="risk-marker"></div></div>
-                <div class="risk-labels"><span>Baixo</span><span>Médio</span><span>Alto</span><span>Crítico</span></div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-    with center:
-        with section("Casos previstos x casos históricos", height=440, key="bairro_cases", css_class="bairro-main-section"):
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=serie_bairro["Semana"], y=serie_bairro["Casos previstos"], name="Casos previstos", mode="lines+markers+text", text=serie_bairro["Casos previstos"], textposition="top center", line=dict(color="#1683ff", width=3)))
-            fig.add_trace(go.Scatter(x=serie_bairro["Semana"], y=serie_bairro["Casos históricos"], name="Casos históricos", mode="lines+markers+text", text=serie_bairro["Casos históricos"], textposition="bottom center", line=dict(color="#16b6bd", width=3)))
-            fig.add_vrect(x0="SE 01", x1="SE 01", fillcolor="#dcecff", opacity=0.30, line_width=0)
-            fig = apply_chart_layout(fig, height=315, showlegend=True)
-            fig.update_yaxes(range=[0, 50], title="Casos")
-            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
-
+        with panel("Painel de criticidade dos bairros"):
+            neighborhoods = pd.DataFrame(dashboard["bairros"])
+            if neighborhoods.empty:
+                st.info("Nenhum bairro corresponde ao nível selecionado.")
+            else:
+                geojson = load_neighborhood_geojson()
+                figure = px.choropleth_map(
+                    neighborhoods,
+                    geojson=geojson,
+                    locations="bairro_norm",
+                    featureidkey="properties.bairro_norm",
+                    color="categoria_prevista",
+                    color_discrete_map=RISK_COLORS,
+                    category_orders={"categoria_prevista": RISK_ORDER},
+                    labels={"categoria_prevista": "Criticidade"},
+                    hover_name="bairro_norm",
+                    custom_data=["semana_alvo", "confianca_modelo", "prob_alto", "prob_critico"],
+                    map_style="carto-positron",
+                    center={"lat": -8.055, "lon": -34.91},
+                    zoom=10.2,
+                    opacity=0.78,
+                )
+                figure.update_traces(
+                    hovertemplate=(
+                        "<b>%{location}</b><br>Semana-alvo: %{customdata[0]}<br>"
+                        "Confiança: %{customdata[1]:.1%}<br>P(Alto): %{customdata[2]:.1%}<br>"
+                        "P(Crítico): %{customdata[3]:.1%}<extra></extra>"
+                    ),
+                    marker_line_width=1,
+                    marker_line_color="white",
+                )
+                figure.update_layout(
+                    margin=dict(l=4, r=4, t=4, b=4),
+                    height=450,
+                    legend=dict(title="Criticidade", orientation="h", y=0.01, x=0.01),
+                )
+                st.plotly_chart(figure, width="stretch", config={"displayModeBar": False})
     with right:
-        with section("Variáveis climáticas (lag4)", height=440, key="bairro_climate", css_class="bairro-main-section bairro-climate-section"):
+        with panel("Bairros com maior risco"):
+            ranking = pd.DataFrame(dashboard["ranking"])
+            ranking = ranking[["bairro_norm", "categoria_prevista", "confianca_modelo", "prob_alto", "prob_critico"]]
+            ranking.columns = ["Bairro", "Criticidade", "Confiança", "P(Alto)", "P(Crítico)"]
+            st.dataframe(
+                ranking,
+                hide_index=True,
+                width="stretch",
+                height=420,
+                column_config={
+                    "Confiança": st.column_config.ProgressColumn(format="percent", min_value=0, max_value=1),
+                    "P(Alto)": st.column_config.NumberColumn(format="percent"),
+                    "P(Crítico)": st.column_config.NumberColumn(format="percent"),
+                },
+            )
+
+    distribution_col, horizons_col = st.columns([0.8, 1.4])
+    with distribution_col:
+        with panel("Distribuição da criticidade"):
+            distribution = pd.DataFrame(dashboard["distribuicao"])
+            figure = px.pie(
+                distribution,
+                names="categoria",
+                values="bairros",
+                color="categoria",
+                color_discrete_map=RISK_COLORS,
+                hole=0.58,
+                category_orders={"categoria": RISK_ORDER},
+            )
+            figure.update_traces(
+                textinfo="label+value+percent",
+                hovertemplate="%{label}: %{value} bairros (%{percent})<extra></extra>",
+            )
+            figure.update_layout(margin=dict(l=5, r=5, t=5, b=5), height=330, showlegend=False)
+            st.plotly_chart(figure, width="stretch", config={"displayModeBar": False})
+    with horizons_col:
+        with panel("Evolução da criticidade por horizonte"):
+            horizon_distribution = pd.DataFrame(dashboard["distribuicao_horizontes"])
+            long = horizon_distribution.melt(
+                id_vars="horizonte_semanas",
+                value_vars=RISK_ORDER,
+                var_name="Categoria",
+                value_name="Bairros",
+            )
+            long["Horizonte"] = long["horizonte_semanas"].map(lambda value: f"S+{int(value)}")
+            figure = px.bar(
+                long,
+                x="Horizonte",
+                y="Bairros",
+                color="Categoria",
+                color_discrete_map=RISK_COLORS,
+                category_orders={"Categoria": RISK_ORDER},
+                text="Bairros",
+            )
+            figure.update_layout(barmode="stack", margin=dict(l=5, r=5, t=10, b=5), height=330)
+            figure.update_xaxes(title=None)
+            figure.update_yaxes(title="Número de bairros")
+            st.plotly_chart(figure, width="stretch", config={"displayModeBar": False})
+
+    climate_col, performance_col, update_col = st.columns([1.2, 1.1, 0.8])
+    with climate_col:
+        with panel("Condições climáticas recentes"):
+            climate = pd.DataFrame(detail["clima"])
+            figure = go.Figure()
+            figure.add_bar(x=climate["semana"], y=climate["precipitacao_total"], name="Chuva (mm)", marker_color="#1683ff")
+            figure.add_scatter(x=climate["semana"], y=climate["temp_max_media"], name="Temperatura máxima (°C)", yaxis="y2", line=dict(color="#f1283c", width=3))
+            figure.update_layout(
+                height=330,
+                margin=dict(l=5, r=5, t=20, b=5),
+                legend=dict(orientation="h", y=1.12),
+                yaxis=dict(title="mm"),
+                yaxis2=dict(title="°C", overlaying="y", side="right"),
+            )
+            st.plotly_chart(figure, width="stretch", config={"displayModeBar": False})
+    with performance_col:
+        with panel("Desempenho do XGBoost"):
+            metrics = pd.DataFrame(performance["metricas"])
+            metric_long = metrics.melt(
+                id_vars="horizonte_semanas",
+                value_vars=["acuracia_balanceada", "f1_macro", "f2_macro"],
+                var_name="Métrica",
+                value_name="Valor",
+            )
+            metric_long["Horizonte"] = metric_long["horizonte_semanas"].map(lambda value: f"S+{int(value)}")
+            metric_long["Métrica"] = metric_long["Métrica"].map(
+                {"acuracia_balanceada": "Acurácia balanceada", "f1_macro": "F1 macro", "f2_macro": "F2 macro"}
+            )
+            figure = px.line(metric_long, x="Horizonte", y="Valor", color="Métrica", markers=True)
+            figure.update_yaxes(range=[0, 1], tickformat=".0%", title=None)
+            figure.update_xaxes(title=None)
+            figure.update_layout(height=330, margin=dict(l=5, r=5, t=20, b=5), legend=dict(orientation="h", y=1.16))
+            st.plotly_chart(figure, width="stretch", config={"displayModeBar": False})
+            if performance.get("fonte") == "producao":
+                st.caption(
+                    f"Produção: {performance.get('semanas_avaliadas')} semanas consolidadas "
+                    f"({performance.get('periodo_inicio')} a {performance.get('periodo_fim')})."
+                )
+            else:
+                st.caption("Referência atual: avaliação temporal independente com dados de 2021.")
+    with update_col:
+        with panel("Atualização"):
+            update = dashboard["atualizacao"]
+            mode_label = "Produção" if update["modo"] == "producao" else "Validação histórica"
             st.markdown(
                 f"""
-                <div style="display:flex; gap:14px; align-items:center; padding:18px 0 24px 0;">
-                    <div class="updates-icon" style="background:#eaf3ff;color:#1683ff;font-size:22px;">🌧️</div>
-                    <div><b>Chuva acumulada</b><div style="font-size:27px;font-weight:950;color:#092b4c;">{br_float(row['Chuva lag4'])} mm</div><span class="muted">Acumulado em 4 semanas</span></div>
-                </div>
-                <hr style="border:0;border-top:1px solid #e6edf6;">
-                <div style="display:flex; gap:14px; align-items:center; padding:24px 0 12px 0;">
-                    <div class="updates-icon" style="background:#ffe8e8;color:#f1283c;font-size:22px;">🌡️</div>
-                    <div><b>Temperatura máxima</b><div style="font-size:27px;font-weight:950;color:#092b4c;">{br_float(row['Temp. max lag4'])} °C</div><span class="muted">Média das máximas em 4 semanas</span></div>
-                </div>
-                <div class="footer-note">Dados até a SE 2025-01</div>
+                <div class="update-row"><div class="update-label">Modelo</div><div class="update-value">{update['modelo']}</div></div>
+                <div class="update-row"><div class="update-label">Versão</div><div class="update-value">{update['versao']}</div></div>
+                <div class="update-row"><div class="update-label">Dados processados até</div><div class="update-value">SE {update['dados_processados_ate']}</div></div>
+                <div class="update-row"><div class="update-label">Modo</div><div class="update-value">{mode_label}</div></div>
+                <div class="update-row"><div class="update-label">Previsões geradas em</div><div class="update-value">{update['previsoes_geradas_em']}</div></div>
                 """,
                 unsafe_allow_html=True,
             )
 
-    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
-    loc, tend, actions = st.columns([1.20, 1.00, 1.00], gap="large")
-    with loc:
-        with section("Localização", height=380, key="bairro_location", css_class="bairro-secondary-section"):
-            fig = small_location_map(row)
-            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
+    with panel("Como interpretar os níveis de criticidade"):
+        st.markdown(threshold_table(), unsafe_allow_html=True)
+        st.caption("Os limites são aplicados à incidência acumulada na janela de quatro semanas terminada na semana-alvo.")
 
-    with tend:
-        with section("Tendência para as próximas semanas", height=380, key="bairro_trend", css_class="bairro-secondary-section"):
-            st.markdown(
-                """
-                <div class="mini-card">
-                    <b>📈 Previsão de casos</b><br><br>
-                    <div style="display:grid;grid-template-columns:repeat(4,1fr);text-align:center;gap:8px;">
-                        <div><span class="muted">SE 02<br>(05/01)</span><br><b style="font-size:20px;">16</b></div>
-                        <div><span class="muted">SE 03<br>(12/01)</span><br><b style="font-size:20px;">18</b></div>
-                        <div><span class="muted">SE 04<br>(19/01)</span><br><b style="font-size:20px;">20</b></div>
-                        <div><span class="muted">SE 05<br>(26/01)</span><br><b style="font-size:20px;">22</b></div>
-                    </div>
-                </div>
-                <div style="height:10px"></div>
-                <div class="callout-yellow">⚠️ <b>Interpretação</b><br><span class="muted">Risco moderado, manter vigilância. Tendência de aumento gradual nas próximas semanas.</span></div>
-                """,
-                unsafe_allow_html=True,
-            )
 
-    with actions:
-        with section("Ações recomendadas", height=380, key="bairro_actions", css_class="bairro-secondary-section bairro-actions-section"):
-            st.markdown(
-                """
-                <ul style="color:#092b4c;font-weight:720;line-height:1.72;margin-top:0;">
-                    <li>Intensificar o monitoramento de casos e sintomas.</li>
-                    <li>Realizar inspeções domiciliares e eliminação de criadouros.</li>
-                    <li>Reforçar campanhas de mobilização da população.</li>
-                    <li>Manter atenção especial nas próximas 3 semanas.</li>
-                </ul>
-                """,
-                unsafe_allow_html=True,
-            )
-
-    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
-    with section("Detalhes do bairro", info=False):
-        st.markdown(details_table_bairro(row), unsafe_allow_html=True)
-
-### TELA 3
-elif page == "Hospitais":
-    topbar("risco")
-    page_title("Risco de Superlotação Hospitalar")
-
-    chip_l, chip_r = st.columns([1.0, 1.0])
-    with chip_r:
-        st.markdown(
-            """
-            <div class="chips">
-                <span class="chip">⚲ Limpar filtros</span>
-                <span class="chip">UF: SP ×</span>
-                <span class="chip">UF: RJ ×</span>
-                <span class="chip">UF: MG ×</span>
-                <span class="chip">+ Adicionar filtro</span>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-    k1, k2, k3, k4, k5 = st.columns(5)
-    with k1:
-        kpi("Hospitais monitorados", "1.248", "vs semana anterior", "🏥", "#1683ff", "↑ 6,3%", "trend-good")
-    with k2:
-        kpi("Regiões em risco", "214", "vs semana anterior", "📍", "#8556e8", "↑ 8,1%", "trend-up")
-    with k3:
-        kpi("Risco crítico", "68", "vs semana anterior", "⚠️", "#f1283c", "↑ 12,7%", "trend-up")
-    with k4:
-        kpi("Ocupação média prevista", "84,6%", "vs semana anterior", "📈", "#12bfc9", "↑ 4,2 p.p.", "trend-up")
-    with k5:
-        kpi("Pacientes estimados", "18.732", "vs semana anterior", "👥", "#ff8618", "↑ 15,8%", "trend-up")
-
-    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
-    col_map, col_rank = st.columns([1.15, 1.18], gap="large")
-
-    with col_map:
-        with section("Mapa de pressão assistencial no Brasil", height=500, key="hospital_map", css_class="map-section"):
-            fig = brazil_map(hospitais.rename(columns={"Nível de risco": "Nível de alerta", "Hospital / Região": "Bairro", "Pacientes estimados": "Casos previstos"}), "Nível de alerta", "Bairro", "Casos previstos")
-            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
-
-    with col_rank:
-        with section("Hospitais/Regiões com maior risco de superlotação", height=500, key="hospital_ranking", css_class="rank-section"):
-            st.markdown(ranking_table_hospitals(), unsafe_allow_html=True)
-
-    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
-    col_proj, col_demanda, col_pressao = st.columns([1.0, 0.75, 1.3], gap="large")
-
-    with col_proj:
-        with section("Projeção de ocupação por semana", height=410, key="hospital_projection", css_class="hospital-chart-section"):
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=ocupacao_semanal["Semana"], y=ocupacao_semanal["Ocupação atual"], mode="lines+markers+text", name="Ocupação atual", text=[f"{v}%" for v in ocupacao_semanal["Ocupação atual"]], textposition="bottom center", line=dict(color="#1683ff", width=3)))
-            fig.add_trace(go.Scatter(x=ocupacao_semanal["Semana"], y=ocupacao_semanal["Ocupação prevista"], mode="lines+markers+text", name="Ocupação prevista", text=[f"{v}%" for v in ocupacao_semanal["Ocupação prevista"]], textposition="top center", line=dict(color="#f1283c", width=2, dash="dash")))
-            fig = apply_chart_layout(fig, height=305, showlegend=True)
-            fig.update_yaxes(range=[0, 125], title="% ocupação", ticksuffix="%")
-            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
-
-    with col_demanda:
-        with section("Demanda esperada por região", height=410, key="hospital_demand", css_class="hospital-chart-section"):
-            fig = px.bar(demanda_regiao, x="Pacientes estimados", y="Região", orientation="h", text="Pacientes estimados", color="Região", color_discrete_sequence=["#f1283c", "#ff8618", "#ffd448", "#20c665", "#12bfc9"])
-            fig.update_traces(texttemplate="%{text:,}", textposition="outside")
-            fig = apply_chart_layout(fig, height=305, showlegend=False)
-            fig.update_layout(yaxis=dict(categoryorder="total ascending"))
-            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
-
-    with col_pressao:
-        with section(
-            "Fatores de pressão",
-            height=410,
-            key="hospital_pressure",
-            css_class="hospital-chart-section pressure-section",
-        ):
-            components.html(
-                pressure_diagram_html(),
-                height=315,
-                scrolling=False,
-            )
-
-### TELA 4
 else:
-    topbar("alerta")
-    page_title("Relatórios")
-    with section("Tela prevista para desenvolvimento futuro", info=False):
-        st.markdown(
-            "Nesta área, futuramente poderão ser exibidos relatórios exportáveis por semana "
-            "epidemiológica, cidade, UF, bairro, nível de alerta e hospitais em risco."
+    filter_week, filter_neighborhood, filter_horizon = st.columns([1.2, 1.6, 0.8])
+    with filter_week:
+        origin_label = st.selectbox("Semana epidemiológica de origem", origin_labels, index=0)
+    with filter_neighborhood:
+        neighborhood_label = st.selectbox(
+            "Bairro",
+            ["Todos os bairros", *[name.title() for name in options["bairros"]]],
+        )
+    with filter_horizon:
+        selected_horizon = st.selectbox("Detalhar horizonte", [1, 2, 3, 4], format_func=lambda value: f"S+{value}")
+    origin_year, origin_week = [int(value) for value in origin_label.split("-")]
+    neighborhood = None if neighborhood_label == "Todos os bairros" else neighborhood_label.upper()
+    detail = load_or_stop(
+        "/api/bairro",
+        {"origin_year": origin_year, "origin_week": origin_week, "bairro": neighborhood},
+    )
+    forecasts = pd.DataFrame(detail["previsoes"]).sort_values("horizonte_semanas")
+    if "status_avaliacao" not in forecasts:
+        forecasts["status_avaliacao"] = "Consolidado"
+    if "data_avaliacao" not in forecasts:
+        forecasts["data_avaliacao"] = pd.NA
+    selected = forecasts.loc[forecasts["horizonte_semanas"].astype(int).eq(selected_horizon)].iloc[0]
+
+    st.subheader(f"{detail['nome']} — previsões de criticidade")
+    mode = str(selected.get("modo_resultado", "validacao_historica_2021"))
+    mode_text = (
+        "As previsões são operacionais e serão avaliadas quando os dados observados estiverem disponíveis."
+        if mode == "producao"
+        else "Os resultados são previsões históricas produzidas sem utilizar os valores futuros."
+    )
+    st.caption(f"Informações disponíveis até a SE {detail['semana_origem']}. {mode_text}")
+
+    k1, k2, k3, k4, k5 = st.columns(5)
+    k1.metric("População", br_int(detail["populacao"]))
+    k2.metric("Casos observados — 4 semanas", br_int(detail["casos_observados_recentes_4s"]))
+    k3.metric("Incidência observada — 4 semanas", br_float(detail["incidencia_recente_4s_100k"]))
+    k4.metric("Criticidade observada recente", detail["categoria_recente_observada"])
+    if detail["escopo"] == "bairro":
+        k5.metric(f"Previsão S+{selected_horizon}", selected["categoria_prevista"])
+    else:
+        k5.metric(f"Alto/crítico em S+{selected_horizon}", br_int(selected["bairros_alto_critico"]))
+
+    st.markdown("### Horizontes de previsão")
+    horizon_cards(forecasts, detail["escopo"])
+    st.caption("Cada horizonte classifica a incidência acumulada em quatro semanas terminada na respectiva semana-alvo.")
+
+    probability_col, trajectory_col = st.columns([0.85, 1.35])
+    with probability_col:
+        with panel(f"Probabilidade estimada — S+{selected_horizon}"):
+            st.plotly_chart(probability_chart(selected), width="stretch", config={"displayModeBar": False})
+    with trajectory_col:
+        with panel("Trajetória das probabilidades nos quatro horizontes"):
+            trajectory = forecasts.melt(
+                id_vars=["horizonte_semanas", "semana_alvo"],
+                value_vars=["prob_baixo", "prob_medio", "prob_alto", "prob_critico"],
+                var_name="Categoria",
+                value_name="Probabilidade",
+            )
+            trajectory["Categoria"] = trajectory["Categoria"].map(
+                {"prob_baixo": "Baixo", "prob_medio": "Médio", "prob_alto": "Alto", "prob_critico": "Crítico"}
+            )
+            trajectory["Horizonte"] = trajectory["horizonte_semanas"].map(lambda value: f"S+{int(value)}")
+            figure = px.line(
+                trajectory,
+                x="Horizonte",
+                y="Probabilidade",
+                color="Categoria",
+                markers=True,
+                color_discrete_map=RISK_COLORS,
+                category_orders={"Categoria": RISK_ORDER},
+                hover_data=["semana_alvo"],
+            )
+            figure.update_yaxes(range=[0, 1.08], tickformat=".0%", title=None)
+            figure.update_xaxes(title=None)
+            figure.update_layout(
+                height=385,
+                margin=dict(l=5, r=5, t=52, b=5),
+                legend=dict(orientation="h", y=1.18, x=0),
+            )
+            st.plotly_chart(figure, width="stretch", config={"displayModeBar": False})
+
+    history_col, climate_col = st.columns([1.3, 1])
+    with history_col:
+        with panel("Histórico observado até a semana de origem"):
+            history = pd.DataFrame(detail["historico"])
+            figure = go.Figure()
+            figure.add_bar(x=history["semana"], y=history["casos_totais"], name="Casos na semana", marker_color="#1683ff")
+            figure.add_scatter(x=history["semana"], y=history["casos_acumulados_4s"], name="Acumulado de 4 semanas", line=dict(color="#13bfcf", width=3))
+            figure.update_layout(height=350, margin=dict(l=5, r=5, t=20, b=5), legend=dict(orientation="h", y=1.12))
+            figure.update_yaxes(title="Casos observados")
+            st.plotly_chart(figure, width="stretch", config={"displayModeBar": False})
+    with climate_col:
+        with panel("Condições climáticas recentes"):
+            climate = pd.DataFrame(detail["clima"])
+            figure = go.Figure()
+            figure.add_bar(x=climate["semana"], y=climate["precipitacao_total"], name="Chuva (mm)", marker_color="#1683ff")
+            figure.add_scatter(x=climate["semana"], y=climate["temp_max_media"], name="Temperatura máxima (°C)", yaxis="y2", line=dict(color="#f1283c", width=3))
+            figure.update_layout(
+                height=350,
+                margin=dict(l=5, r=5, t=20, b=5),
+                legend=dict(orientation="h", y=1.12),
+                yaxis=dict(title="mm"),
+                yaxis2=dict(title="°C", overlaying="y", side="right"),
+            )
+            st.plotly_chart(figure, width="stretch", config={"displayModeBar": False})
+
+    definition_col, actions_col = st.columns([1.1, 0.9])
+    with definition_col:
+        with panel("Como interpretar os níveis"):
+            st.markdown(threshold_table(), unsafe_allow_html=True)
+    with actions_col:
+        with panel("Ações recomendadas"):
+            if detail["escopo"] == "bairro":
+                level = selected["categoria_prevista"]
+                actions = RISK_ACTIONS[level]
+                st.markdown(f"**Nível previsto em S+{selected_horizon}: {level}**")
+            else:
+                actions = [
+                    "Priorizar os bairros classificados como Alto ou Crítico no ranking.",
+                    "Reavaliar os horizontes com crescimento da proporção de categorias graves.",
+                    "Cruzar os alertas com notificações e condições climáticas recentes.",
+                ]
+                st.markdown(f"**Resumo municipal em S+{selected_horizon}**")
+            st.markdown('<ul class="action-list">' + "".join(f"<li>{action}</li>" for action in actions) + "</ul>", unsafe_allow_html=True)
+
+    with panel("Detalhes das previsões"):
+        if detail["escopo"] == "bairro":
+            table = forecasts[[
+                "semana_alvo", "horizonte_semanas", "categoria_prevista", "confianca_modelo",
+                "prob_baixo", "prob_medio", "prob_alto", "prob_critico",
+                "categoria_observada_alvo", "status_avaliacao", "previsao_correta",
+            ]].copy()
+            table.columns = [
+                "Semana-alvo", "Horizonte", "Categoria prevista", "Confiança",
+                "P(Baixo)", "P(Médio)", "P(Alto)", "P(Crítico)",
+                "Categoria observada", "Situação", "Acerto",
+            ]
+            table["Categoria observada"] = table["Categoria observada"].fillna("Aguardando dados")
+
+            def result_label(row: pd.Series) -> str:
+                if row["Situação"] == "Pendente" or pd.isna(row["Acerto"]):
+                    return "Aguardando observação"
+                result = "Acertou" if bool(row["Acerto"]) else "Errou"
+                return f"{result} (provisório)" if row["Situação"] == "Provisório" else result
+
+            table["Resultado"] = table.apply(result_label, axis=1)
+            table = table.drop(columns="Acerto")
+        else:
+            table = forecasts[[
+                "semana_alvo", "horizonte_semanas", "bairros_alto_critico", "bairros_criticos",
+                "confianca_modelo", "prob_baixo", "prob_medio", "prob_alto", "prob_critico",
+            ]].copy()
+            table.columns = [
+                "Semana-alvo", "Horizonte", "Bairros alto/crítico", "Bairros críticos",
+                "Confiança média", "P(Baixo)", "P(Médio)", "P(Alto)", "P(Crítico)",
+            ]
+        table["Horizonte"] = table["Horizonte"].map(lambda value: f"S+{int(value)}")
+        st.dataframe(table, hide_index=True, width="stretch")
+        st.download_button(
+            "Baixar dados filtrados (CSV)",
+            data=table.to_csv(index=False).encode("utf-8-sig"),
+            file_name=f"epidemiological_forecaster_{detail['nome'].lower().replace(' ', '_')}_{origin_label}.csv",
+            mime="text/csv",
         )

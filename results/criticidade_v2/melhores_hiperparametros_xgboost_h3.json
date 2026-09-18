@@ -1,0 +1,13 @@
+{
+  "candidato": 5,
+  "arvores": 494,
+  "learning_rate": 0.08,
+  "max_depth": 3,
+  "min_child_weight": 8,
+  "gamma": 0.5,
+  "subsample": 0.7,
+  "colsample_bytree": 1.0,
+  "reg_lambda": 5.0,
+  "reg_alpha": 1.0,
+  "weight_power": 0.75
+}

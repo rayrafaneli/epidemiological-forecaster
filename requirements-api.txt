@@ -1,0 +1,7 @@
+fastapi>=0.100
+uvicorn[standard]
+pandas>=2.0
+numpy>=1.24
+python-dotenv
+SQLAlchemy>=2.0
+psycopg2-binary

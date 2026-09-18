@@ -1,198 +1,170 @@
-# Sistema Inteligente de Predição de Dengue (SIPD)
+# Epidemiological Forecaster
 
-## 1. Visão geral do projeto
+Aplicação de previsão da criticidade epidemiológica da dengue por bairro do Recife. O sistema usa dados semanais de casos, clima e população para classificar os horizontes `S+1` a `S+4` como `Baixo`, `Médio`, `Alto` ou `Crítico`.
 
-O Sistema Inteligente de Predição de Dengue (SIPD) é uma solução de monitoramento epidemiológico para apoiar a previsão de surtos de dengue em Recife/PE. O sistema combina dados climáticos do INMET, indicadores demográficos do IBGE e dados de notificações e integração com o Supabase, utilizando modelos de Machine Learning baseados em XGBoost para prever risco e alertas por bairro.
+O XGBoost é o modelo operacional. RNA e LSTM permanecem no projeto como experimentos comparativos do TCC.
 
-A plataforma foi estruturada para facilitar:
+## Arquitetura
 
-- a análise de riscos por bairro ou região;
-- a identificação de padrões climáticos associados à elevação dos casos;
-- a visualização de cenários em dashboards interativos;
-- a disponibilização de previsões por meio de API REST para consumo em aplicações web.
-
-A solução conta com:
-
-- backend em FastAPI para exposição dos modelos e predições;
-- frontend em Streamlit para visualização e análise interativa;
-- integração com banco de dados Supabase para dados estruturados;
-- pipeline de engenharia de features para preparação dos dados de entrada do modelo.
-
----
-
-## 2. Arquitetura do sistema
-
-A arquitetura do projeto segue uma abordagem em camadas:
-
-1. Fonte de dados
-   - INMET: dados climáticos históricos e semanais;
-   - IBGE: dados demográficos por bairro;
-   - Supabase/DATASUS: dados de notificações e contexto epidemiológico;
-   - arquivos locais e datasets de suporte para desenvolvimento e validação.
-
-2. Pipeline de dados
-   - scripts em `src/features/` transformam e consolidam as variáveis relevantes;
-   - é gerado um conjunto de features para treinamento e previsão;
-   - o modelo XGBoost é treinado e persistido em arquivo JSON.
-
-3. Backend / API
-   - a API FastAPI, localizada em `app/main.py`, lê o modelo treinado e acessa o banco de dados via SQLAlchemy;
-   - expõe o endpoint `/predict/recife` para receber ano e semana e retornar a previsão por bairro.
-
-4. Front-end
-   - o dashboard em Streamlit, em `app/app.py`, consome a API e apresenta mapas, KPIs, tabelas e gráficos ao usuário.
-
-5. Deploy
-   - a API fica publicada no Render;
-   - o frontend pode consumir a API em produção;
-   - o banco de dados Supabase serve como fonte central para os dados estruturados.
-
-Fluxo de comunicação:
-
-Supabase --> FastAPI (Render) --> Streamlit (dashboard)
-
----
-
-## 3. Pré-requisitos
-
-Antes de iniciar, certifique-se de que sua máquina possui:
-
-- Python 3.10 ou superior;
-- Git instalado e configurado;
-- acesso à internet para instalar dependências e consultar a API/serviços externos;
-- um banco Supabase com a variável `DATABASE_URL` configurada;
-- editor de código como VS Code (opcional, mas recomendado).
-
----
-
-## 4. Configuração local do ambiente
-
-### 4.1 Clonar o repositório
-
-```bash
-git clone https://github.com/seu-usuario/epidemiological-forecaster.git
-cd epidemiological-forecaster
+```text
+Supabase ──► GitHub Actions ──► XGBoost S+1…S+4 ──► Supabase
+    ▲                                                  │
+    └──────────────────── FastAPI ◄────────────────────┘
+                              │
+                              ▼
+                     Streamlit Community Cloud
 ```
 
-### 4.2 Criar e ativar o ambiente virtual
+- **Supabase:** dados semanais e previsões.
+- **GitHub Actions:** verificação diária, inferência e avaliação retroativa.
+- **FastAPI:** camada de consulta e regras de apresentação.
+- **Streamlit:** dashboard público.
+- **Render Free:** hospedagem prevista para a FastAPI.
 
-No Windows (PowerShell):
+## Separação entre avaliação e produção
+
+As métricas acadêmicas continuam sendo calculadas sem vazamento temporal:
+
+- treinamento de avaliação: 2015–2020;
+- teste independente: 2021.
+
+Depois da avaliação, a versão de produção é treinada com 2015–2021. Essa versão gera previsões posteriores à última semana completa, mas não é avaliada nos dados usados em seu próprio treinamento.
+
+Previsões operacionais passam pelos estados:
+
+- `Pendente`: semana-alvo ainda indisponível;
+- `Provisório`: resultado disponível, sujeito a notificações atrasadas;
+- `Consolidado`: quatro semanas transcorridas desde a semana-alvo.
+
+O prazo é configurado por `EVALUATION_LAG_WEEKS`, com padrão igual a `4`.
+
+## Pré-requisitos locais
+
+- Python 3.12;
+- Git;
+- conexão PostgreSQL do Supabase para tarefas de implantação;
+- acesso ao repositório privado.
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-```
-
-No Linux/macOS:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
-### 4.3 Instalar dependências
-
-```bash
 pip install -r requirements.txt
 ```
 
-### 4.4 Configurar o arquivo `.env`
+Copie `.env.example` para `.env` somente no ambiente local. Nunca envie `.env` ou `DATABASE_URL` ao GitHub.
 
-Crie um arquivo `.env` na raiz do projeto e configure a variável abaixo:
+## Executar localmente
 
-```env
-DATABASE_URL=postgresql://usuario:senha@host:5432/nome_do_banco
-```
+Backend:
 
-Essa variável é usada pelo backend FastAPI para acessar os dados do Supabase.
-
-> Importante: mantenha esse arquivo fora do controle de versão, caso esteja presente no `.gitignore`.
-
----
-
-## 5. Como rodar o projeto
-
-### 5.1 Treinar e gerar o modelo localmente
-
-Para processar os dados e gerar o arquivo do modelo:
-
-```bash
-python src/features/build_features.py
-```
-
-Esse passo prepara as features e salva o modelo XGBoost em arquivo JSON (por exemplo, `model_xgb_recife.json`).
-
-### 5.2 Subir a API FastAPI localmente
-
-Na raiz do projeto:
-
-```bash
+```powershell
 uvicorn app.main:app --reload
 ```
 
-A API ficará acessível em:
+Frontend, em outro terminal:
 
-- http://127.0.0.1:8000
-- documentação Swagger em http://127.0.0.1:8000/docs
-
-### 5.3 Executar o dashboard Streamlit
-
-No diretório raiz:
-
-```bash
+```powershell
 streamlit run app/app.py
 ```
 
-O dashboard abrirá localmente e exibirá os indicadores, o mapa de risco e os gráficos de previsão.
+O frontend usa `API_URL`, cujo padrão local é `http://127.0.0.1:8000`.
 
----
+## Preparar o Supabase
 
-## 6. Deploy em produção
+O bootstrap usa apenas dados processados, sem enviar notificações individuais de dengue:
 
-A API do sistema está publicada no Render e conectada ao Supabase para servir dados em ambiente de produção. O front-end em Streamlit pode consumir esse backend em nuvem, permitindo acesso remoto ao sistema sem depender apenas de execução local.
-
-Para produção, o fluxo ideal é:
-
-- Supabase como fonte de dados estruturados;
-- FastAPI hospedado no Render para previsão e integração;
-- Streamlit consumindo a API pública ou a URL do Render;
-- monitoramento e versionamento dos modelos e do código em repositório Git.
-
----
-
-## 7. Estrutura de diretórios principal
-
-```text
-.
-├── app/
-│   ├── app.py
-│   ├── main.py
-│   └── requirements.txt
-├── data/
-├── notebooks/
-├── src/
-│   ├── data_ingestion/
-│   ├── features/
-│   └── models/
-├── .env
-├── .gitignore
-├── requirements.txt
-├── README.md
-├── model_xgb_recife.json
-├── dataset_recife_features.csv
-└── ...
+```powershell
+python -m scripts.bootstrap_supabase --dry-run
+python -m scripts.bootstrap_supabase
 ```
 
----
+O segundo comando exige `DATABASE_URL`. No painel do Supabase, use **Connect → Session pooler** (porta `5432`), que é a opção compatível com ambientes IPv4 como o Render e o GitHub Actions. Ele aplica `supabase/migrations/001_operational_schema.sql` e envia:
 
-## 8. Observações finais
+- `ef_ibge_populacao_bairro`;
+- `ef_inmet_semanal_recife`;
+- `ef_dengue_semanal_bairro`;
+- `ef_previsoes_xgboost_dashboard`;
+- `ef_metricas_xgboost`.
 
-Este projeto representa uma visão aplicada de ciência de dados e engenharia de software para apoio à saúde pública, especialmente no contexto de vigilância epidemiológica. A combinação de modelos preditivos com interface visual e API acessível torna o sistema útil tanto para simulações acadêmicas quanto para demonstrações operacionais.
+O prefixo `ef_` isola as tabelas operacionais das bases antigas que já possam existir no mesmo projeto Supabase.
 
-Se você estiver trabalhando em TCC, este repositório pode ser usado como base para discutir:
+As tabelas têm RLS habilitado e não possuem políticas públicas. Navegadores nunca recebem a credencial PostgreSQL.
 
-- modelagem preditiva para dengue;
-- integração de dados climatológicos e demográficos;
-- arquitetura de dados para aplicações analíticas;
-- implantação em nuvem com Render + Supabase;
-- uso de dashboard interativo para suporte à decisão.
+## Treinar o XGBoost de produção
+
+O comando abaixo reutiliza os hiperparâmetros selecionados na validação temporal e treina os quatro horizontes com os dados consolidados até 2021:
+
+```powershell
+python train_xgboost_production.py
+```
+
+Os artefatos necessários à inferência ficam em `models/criticidade_v2/production/`.
+
+Para gerar uma previsão operacional local usando a última semana completa:
+
+```powershell
+python -m scripts.export_local_production_preview
+```
+
+## Inferência automática
+
+```powershell
+python run_production_pipeline.py
+```
+
+A rotina:
+
+1. confirma que clima e dengue estão simultaneamente completos;
+2. exige 94 bairros, inclusive com zero casos;
+3. detecta semanas ainda não previstas;
+4. executa XGBoost para `S+1` a `S+4`;
+5. atualiza previsões antigas como provisórias ou consolidadas;
+6. publica métricas de produção após pelo menos quatro semanas-alvo consolidadas.
+
+O workflow `.github/workflows/daily-inference.yml` executa essa rotina diariamente. Em branches que não sejam a branch padrão, use `workflow_dispatch` manualmente.
+
+## Variáveis e segredos
+
+| Ambiente | Variável | Finalidade |
+|---|---|---|
+| Render | `DATABASE_URL` | conexão privada da FastAPI com Supabase |
+| Render | `DATA_SOURCE=database` | impede fallback silencioso para CSV |
+| Streamlit | `API_URL` | URL HTTPS pública da FastAPI |
+| GitHub Actions | `DATABASE_URL` | leitura e gravação do pipeline diário |
+| Pipeline | `EVALUATION_LAG_WEEKS=4` | prazo para consolidação |
+
+## Deploy previsto
+
+### FastAPI no Render
+
+O arquivo `render.yaml` define o serviço e o endpoint de saúde `/health`.
+
+### Streamlit Community Cloud
+
+Configuração esperada:
+
+- repositório: `rayrafaneli/epidemiological-forecaster`;
+- branch de revisão: `review/application`;
+- arquivo principal: `app/app.py`;
+- segredo: `API_URL` apontando para o Render.
+
+## Testes
+
+```powershell
+python -m unittest discover -s tests -v
+```
+
+Os testes verificam preparação de dados, ausência de vazamento temporal, contrato do dashboard, completude simultânea de clima e dengue, transição dos estados de avaliação e requisito mínimo das métricas de produção.
+
+## Estrutura principal
+
+```text
+app/                         FastAPI e Streamlit
+models/criticidade_v2/       artefatos de avaliação e produção
+src/                         preparação, modelagem e acesso aos dados
+scripts/                     bootstrap e utilitários locais
+supabase/migrations/         schema PostgreSQL
+.github/workflows/           automação diária
+tests/                       testes automatizados
+render.yaml                  definição da API no Render
+```

@@ -1,0 +1,37 @@
+name: Inferência diária de criticidade
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "15 8 * * *"
+      timezone: "America/Recife"
+
+concurrency:
+  group: dengue-daily-inference
+  cancel-in-progress: false
+
+jobs:
+  predict:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Obter código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Instalar dependências
+        run: pip install -r requirements-production.txt
+
+      - name: Verificar novas semanas, prever e avaliar
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          EVALUATION_LAG_WEEKS: "4"
+          MIN_PRODUCTION_EVALUATION_WEEKS: "4"
+        run: python run_production_pipeline.py

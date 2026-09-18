@@ -3,12 +3,15 @@ uvicorn[standard]
 pandas>=2.0
 scikit-learn
 xgboost
+torch
+joblib
 python-dotenv
 SQLAlchemy
 psycopg2-binary
 requests
 geopandas
 networkx
-streamlit>=1.40
-plotly>=5.20
+streamlit>=1.53
+plotly>=6.0
+pyarrow==25.0.*
 # pysus
